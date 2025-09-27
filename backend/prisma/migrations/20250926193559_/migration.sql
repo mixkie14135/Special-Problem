@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE `sitevisit` ADD COLUMN `customerNote` VARCHAR(191) NULL,
+    ADD COLUMN `customerResponse` ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN `respondedAt` DATETIME(3) NULL;

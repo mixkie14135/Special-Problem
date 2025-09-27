@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+// Enums
+enum UserRole {
+  ADMIN
+  CUSTOMER
+}
+
+enum RequestStatus {
+  NEW          // ลูกค้าส่งคำขอใหม่
+  SURVEY       // นัดหมายดูหน้างานแล้ว
+  SURVEY_DONE  // ดูหน้างานเสร็จ
+  QUOTED       // ส่งใบเสนอราคาแล้ว
+  APPROVED     // ลูกค้าตกลง
+  REJECTED     // ลูกค้าปฏิเสธ
+}
+
+enum SiteVisitStatus {
+  PENDING
+  DONE
+  CANCELLED
+}
+
+enum QuotationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SiteVisitResponse {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// =========================
+// MODELS
+// =========================
+
+// ผู้ใช้งาน (รวม admin + customer)
+// User: บังคับ first/last และคง name ไว้ใช้แสดงผล/ค้นหา
+model User {
+  id         Int       @id @default(autoincrement())
+  firstName  String    // NEW: บังคับกรอก
+  lastName   String   // NEW: บังคับกรอก
+  name       String    // NEW: เก็บชื่อเต็มไว้ใช้แสดงผล (first + " " + last)
+
+  email      String    @unique
+  password   String
+  role       UserRole  @default(CUSTOMER)
+  phone      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  requests   ServiceRequest[]
+}
+
+// ประเภทบริการ (ปูกระเบื้อง, ทาสี ฯลฯ) — ใช้โชว์ในหน้า “บริการของเรา”
+model ServiceCategory {
+  id          Int             @id @default(autoincrement())
+  name        String
+  description String?         // ADDED: รายละเอียดสั้น ๆ สำหรับหน้า Services
+  iconUrl     String?         // ADDED: ไอคอนโลโก้เล็ก ๆ ตาม UI
+  requests    ServiceRequest[]
+}
+
+// คำขอใบเสนอราคา (ลูกค้ากรอกฟอร์ม + แนบรูป + ปักหมุดตำแหน่ง)
+// หมายเหตุ: snapshot ฟิลด์ contact* จะถูก prefill จาก User แต่ลูกค้าแก้ไขได้ ก่อน submit
+// ServiceRequest: ตัด contactHonorific ออก ใช้ prefix "คุณ" ตอนเรนเดอร์เอกสาร
+model ServiceRequest {
+  id               Int       @id @default(autoincrement())
+  title            String
+  description      String
+  status           RequestStatus @default(NEW)
+  createdAt        DateTime  @default(now())
+
+  customerId       Int
+  categoryId       Int
+  customer         User             @relation(fields: [customerId], references: [id])
+  category         ServiceCategory  @relation(fields: [categoryId], references: [id])
+
+  // Contact snapshot (ไม่มีคำนำหน้า)
+  contactFirstName String    // REQUIRED
+  contactLastName  String    // REQUIRED
+  contactPhone     String
+  contactEmail     String
+
+  // ... (ฟิลด์ Location/Images ตามที่คุณมีแล้ว) ...
+  latitude         Float?
+  longitude        Float?
+  placeName        String?
+  formattedAddress String?
+  addressLine      String?
+  subdistrict      String?
+  district         String?
+  province         String?
+  postalCode       String?
+  placeId          String?
+
+  siteVisits       SiteVisit[]
+  quotations       Quotation[]
+  images           RequestImage[]
+}
+
+// ไฟล์รูปที่ลูกค้าแนบตอน “ขอใบเสนอราคา”
+model RequestImage {
+  id         Int      @id @default(autoincrement())
+  requestId  Int
+  imageUrl   String           // ADDED: path/URL ไฟล์รูป
+  createdAt  DateTime @default(now())
+
+  request    ServiceRequest @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])       // ADDED: เร่ง query รูปตามคำขอ
+}
+
+// นัดหมายดูหน้างาน
+model SiteVisit {
+  id          Int      @id @default(autoincrement())
+  scheduledAt DateTime
+  status      SiteVisitStatus @default(PENDING)
+
+  // NEW: การตอบจากลูกค้า
+  customerResponse SiteVisitResponse @default(PENDING)  // NEW
+  customerNote     String?           // NEW: ข้อความจากลูกค้า
+  respondedAt      DateTime?         // NEW: เวลาที่ลูกค้าตอบ
+
+  requestId   Int
+  request     ServiceRequest @relation(fields: [requestId], references: [id])
+}
+
+// ใบเสนอราคา (แอดมินทำไฟล์ PDF ภายนอกแล้วอัปโหลดแนบ)
+model Quotation {
+  id         Int      @id @default(autoincrement())
+  fileUrl    String?  // path หรือ URL ของ PDF
+  totalPrice Float?
+  validUntil DateTime?
+  status     QuotationStatus @default(PENDING)
+  createdAt  DateTime @default(now())
+
+  requestId  Int
+  request    ServiceRequest @relation(fields: [requestId], references: [id])
+}
+
+// ผลงาน (Portfolio) — เวลายืดหยุ่น ไม่ต้อง “เริ่ม–จบ”
+// คุณต้องการแค่ระบุช่วงเวลา/คำอธิบายคร่าว ๆ → ใช้ occurredAt + timeNote
+model Portfolio {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  imageUrl    String   // path หรือ URL ของรูป
+
+  occurredAt  DateTime? // ADDED: วันที่ “คร่าว ๆ” ถ้าทราบ (เช่น เลือกใส่วัน/เดือน/ปีตามสะดวก)
+  timeNote    String?   // ADDED: โน้ตเวลาแบบอิสระ (เช่น “ประมาณ ส.ค. 2025 / กลางปี 2024 / Q3 2025”)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
