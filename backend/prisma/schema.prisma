@@ -106,6 +106,10 @@ model ServiceRequest {
   siteVisits       SiteVisit[]
   quotations       Quotation[]
   images           RequestImage[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([categoryId])
 }
 
 // ไฟล์รูปที่ลูกค้าแนบตอน “ขอใบเสนอราคา”
@@ -133,19 +137,26 @@ model SiteVisit {
 
   requestId   Int
   request     ServiceRequest @relation(fields: [requestId], references: [id])
+
+  @@index([status, scheduledAt])
+  @@index([requestId])
 }
 
 // ใบเสนอราคา (แอดมินทำไฟล์ PDF ภายนอกแล้วอัปโหลดแนบ)
 model Quotation {
   id         Int      @id @default(autoincrement())
   fileUrl    String?  // path หรือ URL ของ PDF
-  totalPrice Float?
-  validUntil DateTime?
+  totalPrice Float?   // NEW: ราคาทั้งหมด
+  validUntil DateTime?  
   status     QuotationStatus @default(PENDING)
   createdAt  DateTime @default(now())
-
   requestId  Int
   request    ServiceRequest @relation(fields: [requestId], references: [id])
+
+  
+  @@index([status])
+  @@index([createdAt])
+  @@index([requestId])
 }
 
 // ผลงาน (Portfolio) — เวลายืดหยุ่น ไม่ต้อง “เริ่ม–จบ”

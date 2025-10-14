@@ -273,3 +273,109 @@ exports.respond = async (req, res) => {
     return res.status(500).json({ status: 'error', message: 'Server error' });
   }
 };
+
+// ============ Customer: list all my site-visits ============
+exports.listMine = async (req, res) => {
+  try {
+    const { status, upcomingDays, dateFrom, dateTo, page = 1, pageSize = 20 } = req.query || {};
+    const take = Math.max(1, Math.min(100, Number(pageSize)));
+    const skip = Math.max(0, (Number(page) - 1) * take);
+
+    const where = {
+      request: { customerId: req.user.id }
+    };
+
+    if (status) where.status = status; // PENDING | DONE | CANCELLED
+
+    // กรองช่วงเวลา
+    if (upcomingDays) {
+      const now = new Date();
+      const until = new Date(now.getTime() + Number(upcomingDays) * 86400000);
+      where.scheduledAt = { gte: now, lte: until };
+    } else if (dateFrom || dateTo) {
+      const gte = dateFrom ? new Date(dateFrom) : undefined;
+      const lte = dateTo   ? new Date(dateTo)   : undefined;
+      where.scheduledAt = { ...(gte && { gte }), ...(lte && { lte }) };
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.siteVisit.findMany({
+        where,
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+        skip, take,
+        include: {
+          request: {
+            select: {
+              id: true, title: true, status: true,
+              formattedAddress: true, placeName: true
+            }
+          }
+        }
+      }),
+      prisma.siteVisit.count({ where })
+    ]);
+
+    return res.json({
+      status: 'ok',
+      data: items,
+      meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) }
+    });
+  } catch (err) {
+    return res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+};
+
+// ============ Customer: list site-visits by my request ============
+exports.listMineByRequest = async (req, res) => {
+  try {
+    const requestId = Number(req.params.requestId);
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'invalid requestId' });
+    }
+
+    // ยืนยันว่า request นี้เป็นของลูกค้าคนนี้
+    const owned = await prisma.serviceRequest.findFirst({
+      where: { id: requestId, customerId: req.user.id },
+      select: { id: true }
+    });
+    if (!owned) return res.status(404).json({ status: 'error', message: 'ServiceRequest not found' });
+
+    const items = await prisma.siteVisit.findMany({
+      where: { requestId },
+      orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+      include: {
+        request: { select: { id: true, title: true, status: true, formattedAddress: true, placeName: true } }
+      }
+    });
+
+    return res.json({ status: 'ok', data: items });
+  } catch (err) {
+    return res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+};
+
+// ============ Customer: detail my site-visit ============
+exports.detailOwn = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const item = await prisma.siteVisit.findUnique({
+      where: { id },
+      include: {
+        request: {
+          select: {
+            id: true, title: true, status: true,
+            formattedAddress: true, placeName: true,
+            customerId: true
+          }
+        }
+      }
+    });
+    if (!item) return res.status(404).json({ status: 'error', message: 'SiteVisit not found' });
+    if (item.request.customerId !== req.user.id) {
+      return res.status(403).json({ status: 'error', message: 'Forbidden' });
+    }
+    return res.json({ status: 'ok', data: item });
+  } catch (err) {
+    return res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+};

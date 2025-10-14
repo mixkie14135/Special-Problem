@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+require('./config/mailer'); // จะ log [Mailer] ready: true / failed ตอนเริ่มรัน
 
 // ====== CONFIG FROM ENV ======
 const PORT = process.env.PORT || 8800;
@@ -69,7 +70,8 @@ const categoryRoutes = require('./modules/categories/category.routes');
 const portfolioRoutes = require('./modules/portfolio/portfolio.routes');
 const requestRoutes = require('./modules/requests/request.routes');
 const siteVisitRoutes = require('./modules/site-visits/siteVisit.routes');
-// const quotationRoutes = require('./modules/quotations/quotation.routes');
+const quotationRoutes = require('./modules/quotations/quotation.routes');
+const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 
 
 app.use('/api', authRoutes);
@@ -78,8 +80,8 @@ app.use('/api', portfolioRoutes);
 app.use('/uploads', express.static('uploads')); // เสิร์ฟไฟล์ในโฟลเดอร์ uploads
 app.use('/api', requestRoutes);
 app.use('/api', siteVisitRoutes);
-// app.use('/api', quotationRoutes);
-
+app.use('/api', quotationRoutes);
+app.use('/api', dashboardRoutes);
 
 // 404 fallback
 app.use((req, res) => {
