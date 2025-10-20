@@ -1,10 +1,12 @@
+// src\modules\categories\category.controller.js
 const prisma = require('../../config/prisma');
+const { deleteFile } = require('../../config/storage');
 
 // GET /api/categories (public)
 exports.list = async (_req, res) => {
   try {
     const items = await prisma.serviceCategory.findMany({
-      orderBy: { id: 'desc' }
+      orderBy: { id: 'asc' }
     });
     res.json({ status: 'ok', data: items });
   } catch (err) {
@@ -32,10 +34,18 @@ exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { name, description, iconUrl } = req.body || {};
+
+    const prev = await prisma.serviceCategory.findUnique({ where: { id } });
     const item = await prisma.serviceCategory.update({
       where: { id },
       data: { name, description, iconUrl }
     });
+
+    // ถ้าเปลี่ยน iconUrl และของเดิมอยู่ใต้ /uploads/ → ลบทิ้ง
+    if (iconUrl && prev?.iconUrl && prev.iconUrl !== iconUrl) {
+      deleteFile(prev.iconUrl);
+    }
+
     res.json({ status: 'ok', data: item });
   } catch (err) {
     if (err.code === 'P2025') {
@@ -49,7 +59,13 @@ exports.update = async (req, res) => {
 exports.remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
+    const prev = await prisma.serviceCategory.findUnique({ where: { id } });
     await prisma.serviceCategory.delete({ where: { id } });
+
+    if (prev?.iconUrl) {
+      deleteFile(prev.iconUrl);
+    }
+
     res.json({ status: 'ok', message: 'Deleted' });
   } catch (err) {
     if (err.code === 'P2025') {

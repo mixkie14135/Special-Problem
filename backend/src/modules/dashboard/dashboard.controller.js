@@ -2,8 +2,8 @@ const prisma = require('../../config/prisma');
 
 /**
  * GET /api/admin/overview
- * Query (optional): from, to (ISO)  ช่วงเวลาสำหรับกราฟ/สถิติ
- * Return: KPIs + breakdown status + (ออปชัน) series รายวัน
+ * Query (optional): from, to (ISO)
+ * Return: KPIs + breakdown status
  */
 exports.overview = async (req, res) => {
   try {
@@ -15,7 +15,6 @@ exports.overview = async (req, res) => {
       if (to) whereRange.createdAt.lte = new Date(to);
     }
 
-    // KPIs
     const total = await prisma.serviceRequest.count({ where: whereRange });
     const byStatus = await prisma.serviceRequest.groupBy({
       by: ['status'],
@@ -23,13 +22,12 @@ exports.overview = async (req, res) => {
       where: whereRange
     });
 
-    // ตัวเลขพิเศษที่ใช้บ่อย
     const [
-      pendingSurvey, // กำลังรอนัด/อยู่ขั้น SURVEY
-      surveyDone,    // ดูหน้างานเสร็จ
-      quoted,        // ส่งใบเสนอราคาแล้ว
-      approved,      // ลูกค้าตกลง
-      rejected       // ปฏิเสธ/ปิดเคส
+      pendingSurvey,
+      surveyDone,
+      quoted,
+      approved,
+      rejected
     ] = await Promise.all([
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'SURVEY' } }),
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'SURVEY_DONE' } }),
@@ -38,7 +36,6 @@ exports.overview = async (req, res) => {
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'REJECTED' } }),
     ]);
 
-    // Conversion (ประมาณ): APPROVED / QUOTED
     const conversion = quoted ? Math.round((approved / quoted) * 100) : null;
 
     return res.json({
@@ -56,18 +53,18 @@ exports.overview = async (req, res) => {
 
 /**
  * GET /api/admin/requests/recent
- * Query: page=1&pageSize=20&status=NEW|SURVEY|...&q=keyword
+ * Query: page=1&pageSize=20&status=...&q=keyword&categoryId&dateFrom&dateTo&sort=createdAt:desc
  */
 exports.recentRequests = async (req, res) => {
   try {
     const {
       page = 1,
       pageSize = 20,
-      status,            // NEW | SURVEY | SURVEY_DONE | QUOTED | APPROVED | REJECTED
-      q,                 // คีย์เวิร์ด
-      categoryId,        // หมวดบริการ
-      dateFrom,          // ISO
-      dateTo,            // ISO
+      status,
+      q,
+      categoryId,
+      dateFrom,
+      dateTo,
       sort = 'createdAt:desc'
     } = req.query || {};
 
@@ -101,8 +98,7 @@ exports.recentRequests = async (req, res) => {
         skip, take,
         select: {
           id: true, title: true, status: true, createdAt: true,
-          district: true,           // ✅ เพิ่ม
-          province: true,           // ✅ เพิ่ม
+          district: true, province: true,
           categoryId: true,
           category: { select: { id: true, name: true } },
           customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }
@@ -111,7 +107,6 @@ exports.recentRequests = async (req, res) => {
       prisma.serviceRequest.count({ where })
     ]);
 
-    // ---- ฟิลด์เสริมสำหรับ UI ----
     const enhanced = items.map((x) => ({
       ...x,
       displayCustomerName: x.customer
@@ -131,62 +126,98 @@ exports.recentRequests = async (req, res) => {
   }
 };
 
-
 /**
  * GET /api/admin/site-visits/upcoming
- * Query: days=14 (default 14 วันถัดไป), page, pageSize
+ * Query:
+ *   - ช่วงเวลา: days (default 14) หรือ dateFrom + dateTo (ISO)
+ *   - กรอง: status=PENDING|DONE|CANCELLED (ว่าง = ทุกสถานะ), q (คำขอ/ชื่อลูกค้า)
+ *   - เฉพาะคำขอ/ลูกค้า: requestId, customerId
+ *   - page, pageSize
  */
 exports.upcomingVisits = async (req, res) => {
+  // 1) log ว่า route โดนยิงจริง พร้อมพารามิเตอร์
+  console.log('[CTRL] upcomingVisits hit', req.query);
+
   try {
-    const days = Number(req.query.days || 14);
-    const page = Number(req.query.page || 1);
-    const pageSize = Math.max(1, Math.min(100, Number(req.query.pageSize || 20)));
-    const skip = Math.max(0, (page - 1) * pageSize);
+    const {
+      days, dateFrom, dateTo,
+      status, q, requestId, customerId,
+      page = 1, pageSize = 20,
+    } = req.query || {};
 
-    const { requestId, customerId, dateFrom, dateTo } = req.query || {};
+    const take = Math.max(1, Math.min(100, Number(pageSize)));
+    const skip = Math.max(0, (Number(page) - 1) * take);
 
+    // --- เวลา ---
     const now = new Date();
-    const until = new Date(now.getTime() + days * 86400000);
-
-    const where = {
-      status: 'PENDING',
-      scheduledAt: { gte: now, lte: until }
-    };
-
-    // override ด้วยช่วงแบบกำหนดเอง ถ้าส่งมา
+    let scheduledAt;
     if (dateFrom || dateTo) {
       const gte = dateFrom ? new Date(dateFrom) : undefined;
       const lte = dateTo   ? new Date(dateTo)   : undefined;
-      where.scheduledAt = { ...(gte && { gte }), ...(lte && { lte }) };
+      scheduledAt = { ...(gte && { gte }), ...(lte && { lte }) };
+    } else {
+      const within = Math.max(1, Math.min(365, Number(days || 14)));
+      const until = new Date(now.getTime() + within * 86400000);
+      scheduledAt = { gte: now, lte: until };
     }
 
-    if (requestId || customerId) {
-      where.request = { is: {} };
-      if (requestId) where.request.is.id = Number(requestId);
-      if (customerId) where.request.is.customerId = Number(customerId);
+    // --- where หลัก ---
+    const where = {
+      scheduledAt,
+      ...(status    ? { status: String(status) } : {}),
+      ...(requestId ? { requestId: Number(requestId) } : {}),
+    };
+
+    // --- เงื่อนไขฝั่ง request (สำคัญ: ต้อง { is: ... }) ---
+    const requestFilter = {};
+    if (customerId) requestFilter.customerId = Number(customerId);
+    if (q && String(q).trim()) {
+      const kw = String(q).trim();
+      requestFilter.OR = [
+        { title: { contains: kw, mode: 'insensitive' } },
+        { customer: { is: { firstName: { contains: kw, mode: 'insensitive' } } } },
+        { customer: { is: { lastName:  { contains: kw, mode: 'insensitive' } } } },
+      ];
     }
+    if (Object.keys(requestFilter).length > 0) {
+      where.request = { is: requestFilter };
+    }
+
+    // 2) log where ที่จะยิงจริง (เผื่อ type ผิด)
+    console.log('[CTRL] upcomingVisits where =', JSON.stringify(where, null, 2));
 
     const [items, total] = await Promise.all([
       prisma.siteVisit.findMany({
         where,
-        orderBy: { scheduledAt: 'asc' },
-        skip, take: pageSize,
+        skip, take,
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
         include: {
           request: {
             select: {
-              id: true, title: true,
-              customerId: true,
+              id: true, title: true, status: true, customerId: true,
               customer: { select: { firstName: true, lastName: true, phone: true, email: true } }
             }
           }
         }
       }),
-      prisma.siteVisit.count({ where })
+      prisma.siteVisit.count({ where }),
     ]);
 
-    // ---- ฟิลด์เสริมสำหรับ UI ----
-    const enhanced = items.map((v) => ({
+    // --- ธง "ล่าสุด" ---
+    const reqIds = [...new Set(items.map(v => v.requestId))];
+    const latestMap = {};
+    if (reqIds.length) {
+      const latestPerReq = await prisma.siteVisit.findMany({
+        where: { requestId: { in: reqIds } },
+        select: { id: true, requestId: true, scheduledAt: true },
+        orderBy: [{ requestId: 'asc' }, { scheduledAt: 'desc' }, { id: 'desc' }],
+      });
+      for (const v of latestPerReq) if (!latestMap[v.requestId]) latestMap[v.requestId] = v.id;
+    }
+
+    const enhanced = items.map(v => ({
       ...v,
+      isLatestForRequest: latestMap[v.requestId] === v.id,
       displayCustomerName: v.request?.customer
         ? `${v.request.customer.firstName} ${v.request.customer.lastName}`.trim()
         : '-',
@@ -196,18 +227,29 @@ exports.upcomingVisits = async (req, res) => {
     return res.json({
       status: 'ok',
       data: enhanced,
-      meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) }
+      meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) }
     });
   } catch (e) {
-    console.error('upcomingVisits error:', e);
-    return res.status(500).json({ status: 'error', message: 'Server error' });
+    // 3) log error แบบเต็ม ๆ
+    console.error('upcomingVisits error >>>', e);
+    // 4) ส่งรายละเอียดกลับ *เฉพาะ dev* เพื่อวิเคราะห์หน้า FE ได้เลย
+    const payload = { status: 'error', message: 'Server error' };
+    if (DEV) {
+      payload.debug = {
+        name: e?.name,
+        code: e?.code,
+        message: e?.message,
+        meta: e?.meta,
+        stack: e?.stack,
+      };
+    }
+    return res.status(500).json(payload);
   }
 };
 
-
 /**
  * GET /api/admin/quotations/pending
- * Query: page, pageSize, q (ค้นคำขอ/ลูกค้า)
+ * Query: page, pageSize, q
  */
 exports.pendingQuotations = async (req, res) => {
   try {
@@ -247,7 +289,6 @@ exports.pendingQuotations = async (req, res) => {
       prisma.quotation.count({ where })
     ]);
 
-    // ---- ฟิลด์เสริมสำหรับ UI ----
     const now = new Date();
     const enhanced = items.map((q) => {
       const name = q.request?.customer
@@ -268,7 +309,7 @@ exports.pendingQuotations = async (req, res) => {
         priceDisplay: q.totalPrice != null
           ? new Intl.NumberFormat('th-TH').format(q.totalPrice) + ' บาท'
           : null,
-        validUntilStatus, // 'ACTIVE' | 'EXPIRED' | null
+        validUntilStatus,
         validUntilText
       };
     });
@@ -283,5 +324,3 @@ exports.pendingQuotations = async (req, res) => {
     return res.status(500).json({ status: 'error', message: 'Server error' });
   }
 };
-
-

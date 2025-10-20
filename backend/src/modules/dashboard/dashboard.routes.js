@@ -1,3 +1,4 @@
+// backend/src/modules/dashboard/dashboard.routes.js
 const { Router } = require('express');
 const ctrl = require('./dashboard.controller');
 const { requireAuth, requireAdmin } = require('../../middlewares/auth');

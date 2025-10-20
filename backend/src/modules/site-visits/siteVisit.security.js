@@ -1,4 +1,4 @@
-// ตรวจว่า site-visit นี้เป็นของคำขอที่ลูกค้าคนนี้เป็นเจ้าของจริงไหม
+// backend/src/modules/site-visits/siteVisit.security.js
 const prisma = require('../../config/prisma');
 
 exports.requireCustomerOwnsVisit = async (req, res, next) => {

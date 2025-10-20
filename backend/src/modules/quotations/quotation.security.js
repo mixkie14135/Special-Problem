@@ -1,4 +1,4 @@
-// quotation.security.js
+// src\modules\quotations\quotation.security.js
 const prisma = require('../../config/prisma');
 
 exports.requireCustomerOwnsQuotation = async (req, res, next) => {

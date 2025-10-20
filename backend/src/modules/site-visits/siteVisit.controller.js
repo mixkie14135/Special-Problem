@@ -1,3 +1,4 @@
+// backend/src/modules/site-visits/siteVisit.controller.js
 const prisma = require('../../config/prisma');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -14,6 +15,34 @@ try {
 }
 
 const TH_TZ = 'Asia/Bangkok';
+
+// ===== เพิ่มฟังก์ชันนี้ไว้ด้านบนไฟล์ (ใต้ const TH_TZ ... ก็ได้) =====
+async function syncRequestStatus(requestId) {
+  // นับสถานะนัดทั้งหมดของคำขอนี้
+  const [countDone, countPending, countCancelled] = await Promise.all([
+    prisma.siteVisit.count({ where: { requestId, status: 'DONE' } }),
+    prisma.siteVisit.count({ where: { requestId, status: 'PENDING' } }),
+    prisma.siteVisit.count({ where: { requestId, status: 'CANCELLED' } }),
+  ]);
+
+  // กติกา:
+  // - ถ้ามี DONE อย่างน้อย 1 → ถือว่า "ดูหน้างานเสร็จ" (SURVEY_DONE)
+  // - else ถ้ามี PENDING อย่างน้อย 1 → อยู่ระหว่างนัดหมาย (SURVEY)
+  // - else ถ้ามีแต่ CANCELLED และไม่มี DONE/PENDING เลย → ปิดเพราะยกเลิก (REJECTED)
+  // - ถ้ายังไม่มีนัดใด ๆ → ไม่ยุ่ง (ให้สถานะเดิมของคำขอคงอยู่)
+  let newStatus = null;
+  if (countDone > 0) newStatus = 'SURVEY_DONE';
+  else if (countPending > 0) newStatus = 'SURVEY';
+  else if (countCancelled > 0) newStatus = 'REJECTED';
+
+  if (newStatus) {
+    await prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: { status: newStatus },
+    });
+  }
+}
+
 
 // helper: format time for email
 function fmt(dt) {
@@ -52,10 +81,7 @@ exports.create = async (req, res) => {
       }
     });
 
-    await prisma.serviceRequest.update({
-      where: { id: reqId },
-      data: { status: 'SURVEY' }
-    });
+    await syncRequestStatus(reqId);
 
     // email (optional)
     try {
@@ -127,12 +153,8 @@ exports.update = async (req, res) => {
     await prisma.siteVisit.update({ where: { id }, data });
 
     // sync serviceRequest
-    if (data.status === 'DONE') {
-      await prisma.serviceRequest.update({ where: { id: visit.requestId }, data: { status: 'SURVEY_DONE' } });
-    } else if (data.status === 'CANCELLED') {
-      await prisma.serviceRequest.update({ where: { id: visit.requestId }, data: { status: 'REJECTED' } });
-    }
-
+    await syncRequestStatus(visit.requestId);
+    
     // email (optional)
     try {
       const reqData = await prisma.serviceRequest.findUnique({
@@ -201,6 +223,9 @@ exports.list = async (req, res) => {
 exports.detail = async (req, res) => {
   try {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {        // <-- เพิ่ม guard นี้
+      return res.status(400).json({ status: 'error', message: 'invalid id' });
+    }
     const item = await prisma.siteVisit.findUnique({
       where: { id },
       include: {
@@ -379,3 +404,4 @@ exports.detailOwn = async (req, res) => {
     return res.status(500).json({ status: 'error', message: 'Server error' });
   }
 };
+

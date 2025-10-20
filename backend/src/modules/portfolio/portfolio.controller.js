@@ -1,12 +1,6 @@
+// src/modules/portfolio/portfolio.controller.js
 const prisma = require('../../config/prisma');
-const path = require('path');
-const fs = require('fs');
-
-function fileUrlFromReq(req, filePath) {
-  // ใช้เสิร์ฟไฟล์ผ่าน /uploads/**
-  const rel = filePath.replace(path.resolve('uploads') + path.sep, '').replace(/\\/g, '/');
-  return `/uploads/${rel}`;
-}
+const { toPublicUrl, deleteFile } = require('../../config/storage');
 
 // GET /api/portfolio (public)
 exports.list = async (req, res) => {
@@ -29,12 +23,10 @@ exports.create = async (req, res) => {
     const { title, description, occurredAt, timeNote } = req.body || {};
     if (!title) return res.status(400).json({ status: 'error', message: 'title is required' });
 
-    let imageUrl = null;
-    if (req.file) {
-      imageUrl = fileUrlFromReq(req, req.file.path);
-    } else {
+    if (!req.file) {
       return res.status(400).json({ status: 'error', message: 'image file is required' });
     }
+    const imageUrl = toPublicUrl(req.file.path);
 
     const data = {
       title,
@@ -51,7 +43,7 @@ exports.create = async (req, res) => {
   }
 };
 
-// PATCH /api/portfolio/:id (admin, เปลี่ยนรูป/ข้อความ)
+// PATCH /api/portfolio/:id (admin)
 exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -64,14 +56,10 @@ exports.update = async (req, res) => {
     if (timeNote !== undefined) data.timeNote = timeNote;
 
     if (req.file) {
-      // อัปเดตรูปใหม่
-      data.imageUrl = fileUrlFromReq(req, req.file.path);
-
-      // (ออปชัน) ลบไฟล์เก่า
+      data.imageUrl = toPublicUrl(req.file.path);
       const prev = await prisma.portfolio.findUnique({ where: { id } });
-      if (prev && prev.imageUrl && prev.imageUrl.startsWith('/uploads/')) {
-        const oldFsPath = path.resolve(prev.imageUrl.slice(1)); // remove leading '/'
-        fs.unlink(oldFsPath, () => {});
+      if (prev?.imageUrl && prev.imageUrl !== data.imageUrl) {
+        deleteFile(prev.imageUrl);
       }
     }
 
@@ -91,13 +79,7 @@ exports.remove = async (req, res) => {
     const id = Number(req.params.id);
     const prev = await prisma.portfolio.findUnique({ where: { id } });
     await prisma.portfolio.delete({ where: { id } });
-
-    // (ออปชัน) ลบไฟล์ด้วย
-    if (prev && prev.imageUrl && prev.imageUrl.startsWith('/uploads/')) {
-      const oldFsPath = path.resolve(prev.imageUrl.slice(1));
-      fs.unlink(oldFsPath, () => {});
-    }
-
+    if (prev?.imageUrl) deleteFile(prev.imageUrl);
     res.json({ status: 'ok', message: 'Deleted' });
   } catch (err) {
     if (err.code === 'P2025') {

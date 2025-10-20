@@ -1,4 +1,4 @@
-// app.js
+// backend/src/app.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -7,90 +7,100 @@ const path = require('path');
 const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-require('./config/mailer'); // จะ log [Mailer] ready: true / failed ตอนเริ่มรัน
+require('./config/mailer');
 
-// ====== CONFIG FROM ENV ======
 const PORT = process.env.PORT || 8800;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+
+const CORS_ORIGINS = (
+  process.env.CORS_ORIGINS ||
+  process.env.FRONTEND_ORIGIN || // backward-compat
+  'http://localhost:3000'
+).split(',').map(s => s.trim()).filter(Boolean);
+
 const SERVER_PUBLIC_URL = process.env.SERVER_PUBLIC_URL || `http://localhost:${PORT}`;
 const UPLOAD_MAX_FILE_MB = Number(process.env.UPLOAD_MAX_FILE_MB || 10);
 
-// ====== UPLOAD PATHS ======
+// uploads
 const UPLOAD_ROOT = path.resolve('uploads');
-const QUOTE_DIR = path.join(UPLOAD_ROOT, 'quotations'); // PDF ใบเสนอราคา
-const PORTFOLIO_DIR = path.join(UPLOAD_ROOT, 'portfolio'); // รูปผลงาน
-const REQUEST_DIR = path.join(UPLOAD_ROOT, 'requests'); // รูปลูกค้าแนบคำขอ
+const QUOTE_DIR = path.join(UPLOAD_ROOT, 'quotations');
+const PORTFOLIO_DIR = path.join(UPLOAD_ROOT, 'portfolio');
+const REQUEST_DIR = path.join(UPLOAD_ROOT, 'requests');
+const CATEGORY_DIR = path.join(UPLOAD_ROOT, 'categories');
+[UPLOAD_ROOT, QUOTE_DIR, PORTFOLIO_DIR, REQUEST_DIR, CATEGORY_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
-// ensure upload dirs exist
-[UPLOAD_ROOT, QUOTE_DIR, PORTFOLIO_DIR, REQUEST_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
-
-// ====== INIT APP ======
 const app = express();
-app.set('trust proxy', 1); // ถ้าเคยอยู่หลัง reverse proxy/CDN ให้ set ไว้ (ไม่เสียหาย)
+app.set('trust proxy', 1);
 
-// Security headers
+/** --------- CORS ต้องมาก่อนทุกอย่างที่ “อาจจบรีเควสต์” เช่น rateLimit --------- */
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);          // e.g. curl/postman
+    if (CORS_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: false,                             // ใช้ Bearer token
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Authorization','Content-Type','Accept'],
+  exposedHeaders: ['Content-Disposition'],
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));              // preflight ทุกเส้นทาง
+
+/** --------- Security headers --------- */
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" } // ให้เสิร์ฟรูป/ไฟล์ได้ข้าม origin
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Rate limit (กันสแปมเบื้องต้น)
+/** --------- Rate limit (ผ่อนตอน dev และไม่คิด OPTIONS) --------- */
+const devMax = 1000;
 app.use(rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000), // 60s
-  max: Number(process.env.RATE_LIMIT_MAX || 60), // 60 req/นาที/ไอพี
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
+  max: Number(process.env.RATE_LIMIT_MAX || (NODE_ENV === 'development' ? devMax : 60)),
+  skip: (req) => req.method === 'OPTIONS',
 }));
 
-// CORS
-app.use(cors({
-  origin: FRONTEND_ORIGIN,   // ถ้าต่อไปมีหลายโดเมน ใช้ฟังก์ชันตรวจได้ (ดูตัวอย่างด้านล่าง)
-  credentials: true
-}));
-
-// Body parsers (เพิ่ม limit เผื่อ multipart ที่ส่ง JSON ร่วม)
+/** --------- Parsers --------- */
 app.use(express.json({ limit: `${UPLOAD_MAX_FILE_MB}mb` }));
 app.use(express.urlencoded({ extended: true }));
-
 app.use(cookieParser());
 
-// Static uploads (ให้ frontend เปิดไฟล์ได้ เช่น /uploads/portfolio/xxx.jpg)
+/** --------- Static --------- */
 app.use('/uploads', express.static(UPLOAD_ROOT));
 
-// ====== HEALTH ======
+/** --------- Health --------- */
 app.get('/api/ping', (_req, res) => {
-  res.json({
-    message: 'API is working!',
-    env: NODE_ENV,
-    publicUrl: SERVER_PUBLIC_URL
-  });
+  res.json({ message: 'API is working!', env: NODE_ENV, publicUrl: SERVER_PUBLIC_URL });
 });
 
-// ====== ROUTES (ค่อยๆ เพิ่มทีหลัง) ======
-const authRoutes = require('./modules/auth/auth.routes');
-const categoryRoutes = require('./modules/categories/category.routes');
-const portfolioRoutes = require('./modules/portfolio/portfolio.routes');
-const requestRoutes = require('./modules/requests/request.routes');
-const siteVisitRoutes = require('./modules/site-visits/siteVisit.routes');
-const quotationRoutes = require('./modules/quotations/quotation.routes');
-const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
+/** --------- Routes --------- */
+app.use('/api', require('./modules/auth/auth.routes'));
+app.use('/api', require('./modules/categories/category.routes'));
+app.use('/api', require('./modules/portfolio/portfolio.routes'));
+app.use('/api', require('./modules/requests/request.routes'));
+app.use('/api', require('./modules/site-visits/siteVisit.routes'));
+app.use('/api', require('./modules/quotations/quotation.routes'));
+app.use('/api', require('./modules/dashboard/dashboard.routes'));
 
+/** --------- Multer error handler --------- */
+app.use((err, req, res, next) => {
+  if (err && err.name === 'MulterError') {
+    let message = 'อัปโหลดไฟล์ไม่สำเร็จ';
+    if (err.code === 'LIMIT_FILE_SIZE') message = `ไฟล์ใหญ่เกินกำหนด (ไม่เกิน ${UPLOAD_MAX_FILE_MB} MB)`;
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') message = 'ชนิดไฟล์ไม่รองรับ';
+    return res.status(400).json({ status: 'error', message });
+  }
+  return next(err);
+});
 
-app.use('/api', authRoutes);
-app.use('/api', categoryRoutes);
-app.use('/api', portfolioRoutes);
-app.use('/uploads', express.static('uploads')); // เสิร์ฟไฟล์ในโฟลเดอร์ uploads
-app.use('/api', requestRoutes);
-app.use('/api', siteVisitRoutes);
-app.use('/api', quotationRoutes);
-app.use('/api', dashboardRoutes);
-
-// 404 fallback
+/** --------- 404 --------- */
 app.use((req, res) => {
   res.status(404).json({ status: 'error', message: 'Not found' });
 });
 
-// Error handler กลาง
-app.use((err, req, res, next) => {
-  // eslint-disable-next-line no-console
+/** --------- Error handler --------- */
+app.use((err, req, res, _next) => {
   console.error(err);
   const status = err.status || 500;
   res.status(status).json({ status: 'error', message: err.message || 'Server error' });
@@ -98,5 +108,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Server is running on ${SERVER_PUBLIC_URL}`);
-  console.log(`CORS origin: ${FRONTEND_ORIGIN}`);
+  console.log(`CORS origins: ${CORS_ORIGINS.join(', ')}`);
 });

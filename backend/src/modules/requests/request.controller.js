@@ -1,3 +1,4 @@
+// backend/src/modules/requests/request.controller.js
 const prisma = require('../../config/prisma');
 const { transporter, mailFrom } = require('../../config/mailer');
 
@@ -125,7 +126,7 @@ exports.listAll = async (req, res) => {
     if (req.query.status) where.status = req.query.status;
     const items = await prisma.serviceRequest.findMany({
       where,
-      orderBy: { id: 'desc' },
+      orderBy: { id: 'asc' },
       include: { images: true, category: true, customer: { select: { id: true, name: true, email: true } } }
     });
     res.json({ status: 'ok', data: items });
@@ -163,3 +164,72 @@ exports.detail = async (req, res) => {
     res.status(500).json({ status: 'error', message: err.message });
   }
 };
+
+// แอดมิน: ลิสต์คำขอล่าสุด (รองรับ q/status/sort/paging)
+exports.listRecent = async (req, res) => {
+  try {
+    const {
+      q = '',
+      status = '',
+      page = 1,
+      pageSize = 10,
+      sort = 'createdAt:desc',
+    } = req.query;
+
+    const where = {};
+    if (status) where.status = status;
+
+    // คีย์เวิร์ด: ค้น title/description/ผู้ติดต่อ/อีเมล/โทร/อีเมลลูกค้า/ชื่อลูกค้า
+    const and = [];
+    if (q) {
+      const kw = String(q);
+      and.push({
+        OR: [
+          { title: { contains: kw, mode: 'insensitive' } },
+          { description: { contains: kw, mode: 'insensitive' } },
+          { contactFirstName: { contains: kw, mode: 'insensitive' } },
+          { contactLastName:  { contains: kw, mode: 'insensitive' } },
+          { contactEmail:     { contains: kw, mode: 'insensitive' } },
+          { contactPhone:     { contains: kw, mode: 'insensitive' } },
+          { customer: { email:     { contains: kw, mode: 'insensitive' } } },
+          { customer: { firstName: { contains: kw, mode: 'insensitive' } } },
+          { customer: { lastName:  { contains: kw, mode: 'insensitive' } } },
+          // จะขยายเพิ่มเช่น category.name ก็ได้ถ้าต้องการ:
+          // { category: { name: { contains: kw, mode: 'insensitive' } } },
+        ],
+      });
+    }
+    if (and.length) where.AND = and;
+
+    const [sortField, sortDir] = String(sort).split(':');
+    const orderBy = { [sortField || 'createdAt']: (sortDir === 'asc' ? 'asc' : 'desc') };
+
+    const take = Math.max(1, Math.min(100, Number(pageSize)));
+    const skip = Math.max(0, (Number(page) - 1) * take);
+
+    const [items, total] = await Promise.all([
+      prisma.serviceRequest.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: {
+          category: true,
+          customer: { select: { id: true, firstName: true, lastName: true, email: true } },
+          // ถ้าต้องการภาพในตาราง ให้ใส่ images: true
+        },
+      }),
+      prisma.serviceRequest.count({ where }),
+    ]);
+
+    return res.json({
+      status: 'ok',
+      data: items,
+      meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: 'error', message: 'Server error' });
+  }
+};
+

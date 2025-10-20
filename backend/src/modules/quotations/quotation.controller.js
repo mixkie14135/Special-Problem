@@ -1,5 +1,6 @@
+// src\modules\quotations\quotation.controller.js
 const prisma = require('../../config/prisma');
-const path = require('path');
+const { toPublicUrl, deleteFile } = require('../../config/storage')
 
 let transporter, mailFrom;
 try { ({ transporter, mailFrom } = require('../../config/mailer')); }
@@ -11,16 +12,10 @@ function asNumber(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : NaN;
 }
-function fileUrlFromReq(file) {
-  // เราเสิร์ฟไฟล์ผ่าน /uploads/**
-  return `/uploads/quotations/${file.filename}`;
-}
 
 /**
  * Admin: upload/create quotation (PDF)
  * POST /api/quotations/:requestId (multipart: file + optional fields)
- * body: totalPrice?, validUntil? (ISO)
- * -> ServiceRequest.status = QUOTED
  */
 exports.create = async (req, res) => {
   try {
@@ -42,45 +37,30 @@ exports.create = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'validUntil must be ISO date' });
     }
 
-    // ตรวจว่า request มีจริง
     const request = await prisma.serviceRequest.findUnique({
       where: { id: requestId },
       include: { customer: true }
     });
     if (!request) return res.status(404).json({ status: 'error', message: 'ServiceRequest not found' });
 
-    
-    //⛔️ Guard: ต้องมีนัดหมาย และต้องตอบรับ และต้อง DONE ก่อนออกใบเสนอราคา
+    // Guard: ต้องมีนัดหมาย → APPROVED → DONE ก่อน
     const latestVisit = await prisma.siteVisit.findFirst({
       where: { requestId },
       orderBy: { scheduledAt: 'desc' }
     });
-
     if (!latestVisit) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'ยังไม่มีนัดหมายดูหน้างานสำหรับคำขอนี้ (ต้องนัดหมายก่อน)'
-      });
+      return res.status(409).json({ status: 'error', message: 'ยังไม่มีนัดหมายดูหน้างานสำหรับคำขอนี้ (ต้องนัดหมายก่อน)' });
     }
-
     if (latestVisit.customerResponse !== 'APPROVED') {
-      return res.status(409).json({
-        status: 'error',
-        message: 'ลูกค้ายังไม่ยืนยันนัดหมายดูหน้างาน (ต้องให้ลูกค้า APPROVED ก่อน)'
-      });
+      return res.status(409).json({ status: 'error', message: 'ลูกค้ายังไม่ยืนยันนัดหมายดูหน้างาน (ต้องให้ลูกค้า APPROVED ก่อน)' });
     }
-
     if (latestVisit.status !== 'DONE') {
-      return res.status(409).json({
-        status: 'error',
-        message: 'ยังไม่ได้ทำการดูหน้างานให้เสร็จ (แอดมินต้องเปลี่ยนสถานะนัดหมายเป็น DONE ก่อน)'
-      });
+      return res.status(409).json({ status: 'error', message: 'ยังไม่ได้ทำการดูหน้างานให้เสร็จ (แอดมินต้องเปลี่ยนสถานะนัดหมายเป็น DONE ก่อน)' });
     }
 
-    // สร้าง quotation
     const q = await prisma.quotation.create({
       data: {
-        fileUrl: fileUrlFromReq(req.file),
+        fileUrl: toPublicUrl(req.file.path),
         totalPrice: price === null ? null : price,
         validUntil: validDate,
         status: 'PENDING',
@@ -88,13 +68,8 @@ exports.create = async (req, res) => {
       }
     });
 
-    // อัปเดตสถานะคำขอ → QUOTED
-    await prisma.serviceRequest.update({
-      where: { id: requestId },
-      data: { status: 'QUOTED' }
-    });
+    await prisma.serviceRequest.update({ where: { id: requestId }, data: { status: 'QUOTED' } });
 
-    // ส่งเมลแจ้งลูกค้า (optional)
     try {
       if (transporter && process.env.SMTP_HOST && process.env.SMTP_USER && request.customer?.email) {
         await transporter.sendMail({
@@ -121,7 +96,6 @@ exports.create = async (req, res) => {
 /**
  * Admin: update (re-upload / adjust fields)
  * PATCH /api/quotations/:id (multipart optional)
- * body: totalPrice?, validUntil? (ISO or empty to clear)
  */
 exports.update = async (req, res) => {
   try {
@@ -153,7 +127,11 @@ exports.update = async (req, res) => {
     }
 
     if (req.file) {
-      data.fileUrl = fileUrlFromReq(req.file);
+      const prev = await prisma.quotation.findUnique({ where: { id } });
+      data.fileUrl = toPublicUrl(req.file.path);
+      if (prev?.fileUrl && prev.fileUrl !== data.fileUrl) {
+        deleteFile(prev.fileUrl);
+      }
     }
 
     const q = await prisma.quotation.update({ where: { id }, data });
