@@ -1,3 +1,4 @@
+// src/modules/dashboard/dashboard.controller.js
 const prisma = require('../../config/prisma');
 
 /**
@@ -55,76 +56,76 @@ exports.overview = async (req, res) => {
  * GET /api/admin/requests/recent
  * Query: page=1&pageSize=20&status=...&q=keyword&categoryId&dateFrom&dateTo&sort=createdAt:desc
  */
-exports.recentRequests = async (req, res) => {
-  try {
-    const {
-      page = 1,
-      pageSize = 20,
-      status,
-      q,
-      categoryId,
-      dateFrom,
-      dateTo,
-      sort = 'createdAt:desc'
-    } = req.query || {};
+// exports.recentRequests = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       pageSize = 20,
+//       status,
+//       q,
+//       categoryId,
+//       dateFrom,
+//       dateTo,
+//       sort = 'createdAt:desc'
+//     } = req.query || {};
 
-    const take = Math.max(1, Math.min(100, Number(pageSize)));
-    const skip = Math.max(0, (Number(page) - 1) * take);
-    const [sortField, sortDir] = String(sort).split(':');
+//     const take = Math.max(1, Math.min(100, Number(pageSize)));
+//     const skip = Math.max(0, (Number(page) - 1) * take);
+//     const [sortField, sortDir] = String(sort).split(':');
 
-    const where = {};
-    if (status) where.status = status;
-    if (categoryId) where.categoryId = Number(categoryId);
-    if (q) {
-      const kw = String(q);
-      where.OR = [
-        { title:            { contains: kw } },
-        { description:      { contains: kw } },
-        { contactEmail:     { contains: kw } },
-        { contactFirstName: { contains: kw } },
-        { contactLastName:  { contains: kw } },
-      ];
-    }
-    if (dateFrom || dateTo) {
-      const gte = dateFrom ? new Date(dateFrom) : undefined;
-      const lte = dateTo   ? new Date(dateTo)   : undefined;
-      where.createdAt = { ...(gte && { gte }), ...(lte && { lte }) };
-    }
+//     const where = {};
+//     if (status) where.status = status;
+//     if (categoryId) where.categoryId = Number(categoryId);
+//     if (q) {
+//       const kw = String(q);
+//       where.OR = [
+//         { title:            { contains: kw } },
+//         { description:      { contains: kw } },
+//         { contactEmail:     { contains: kw } },
+//         { contactFirstName: { contains: kw } },
+//         { contactLastName:  { contains: kw } },
+//       ];
+//     }
+//     if (dateFrom || dateTo) {
+//       const gte = dateFrom ? new Date(dateFrom) : undefined;
+//       const lte = dateTo   ? new Date(dateTo)   : undefined;
+//       where.createdAt = { ...(gte && { gte }), ...(lte && { lte }) };
+//     }
 
-    const [items, total] = await Promise.all([
-      prisma.serviceRequest.findMany({
-        where,
-        orderBy: { [sortField || 'createdAt']: (sortDir === 'asc' ? 'asc' : 'desc') },
-        skip, take,
-        select: {
-          id: true, title: true, status: true, createdAt: true,
-          district: true, province: true,
-          categoryId: true,
-          category: { select: { id: true, name: true } },
-          customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }
-        }
-      }),
-      prisma.serviceRequest.count({ where })
-    ]);
+//     const [items, total] = await Promise.all([
+//       prisma.serviceRequest.findMany({
+//         where,
+//         orderBy: { [sortField || 'createdAt']: (sortDir === 'asc' ? 'asc' : 'desc') },
+//         skip, take,
+//         select: {
+//           id: true, title: true, status: true, createdAt: true,
+//           district: true, province: true,
+//           categoryId: true,
+//           category: { select: { id: true, name: true } },
+//           customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }
+//         }
+//       }),
+//       prisma.serviceRequest.count({ where })
+//     ]);
 
-    const enhanced = items.map((x) => ({
-      ...x,
-      displayCustomerName: x.customer
-        ? `${x.customer.firstName} ${x.customer.lastName}`.trim()
-        : '-',
-      shortAddress: [x.district, x.province].filter(Boolean).join(', ') || null,
-    }));
+//     const enhanced = items.map((x) => ({
+//       ...x,
+//       displayCustomerName: x.customer
+//         ? `${x.customer.firstName} ${x.customer.lastName}`.trim()
+//         : '-',
+//       shortAddress: [x.district, x.province].filter(Boolean).join(', ') || null,
+//     }));
 
-    return res.json({
-      status: 'ok',
-      data: enhanced,
-      meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) }
-    });
-  } catch (e) {
-    console.error('recentRequests error:', e);
-    return res.status(500).json({ status: 'error', message: 'Server error' });
-  }
-};
+//     return res.json({
+//       status: 'ok',
+//       data: enhanced,
+//       meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) }
+//     });
+//   } catch (e) {
+//     console.error('recentRequests error:', e);
+//     return res.status(500).json({ status: 'error', message: 'Server error' });
+//   }
+// };
 
 /**
  * GET /api/admin/site-visits/upcoming
@@ -190,7 +191,7 @@ exports.upcomingVisits = async (req, res) => {
       prisma.siteVisit.findMany({
         where,
         skip, take,
-        orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+        orderBy: [{ id: 'asc' }, { scheduledAt: 'asc' }],
         include: {
           request: {
             select: {

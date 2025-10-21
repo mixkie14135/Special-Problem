@@ -210,7 +210,7 @@ exports.list = async (req, res) => {
     if (req.query.status) where.status = req.query.status; // PENDING | DONE | CANCELLED
     const items = await prisma.siteVisit.findMany({
       where,
-      orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+      orderBy: [{ id: 'asc' }, { scheduledAt: 'asc' }],
       include: { request: { select: { id: true, title: true, contactFirstName: true, contactLastName: true, formattedAddress: true } } }
     });
     res.json({ status: 'ok', data: items });
@@ -326,7 +326,7 @@ exports.listMine = async (req, res) => {
     const [items, total] = await Promise.all([
       prisma.siteVisit.findMany({
         where,
-        orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
         skip, take,
         include: {
           request: {
@@ -367,7 +367,7 @@ exports.listMineByRequest = async (req, res) => {
 
     const items = await prisma.siteVisit.findMany({
       where: { requestId },
-      orderBy: [{ scheduledAt: 'asc' }, { id: 'desc' }],
+      orderBy: [{ id: 'asc' }, { scheduledAt: 'asc' }],
       include: {
         request: { select: { id: true, title: true, status: true, formattedAddress: true, placeName: true } }
       }
