@@ -26,9 +26,15 @@ export default function AdminQuotationsPage() {
   const requestIdParam = params?.get("requestId") || "";
 
   // ===== metrics =====
-  const [metrics, setMetrics] = useState({ total: 0, pending: 0, approved: 0, rejected: 0, conversion: null });
+  const [metrics, setMetrics] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    conversion: null,
+  });
 
-  // ====== Context (when requestId is present) ======
+  // ====== Context (เมื่อมี requestId ใน URL) ======
   const [targetReq, setTargetReq] = useState(null);
   const [latestQuote, setLatestQuote] = useState(null);
   const [uplFile, setUplFile] = useState(null);
@@ -42,8 +48,6 @@ export default function AdminQuotationsPage() {
   const [activeTab, setActiveTab] = useState("ALL"); // ALL | PENDING | APPROVED | REJECTED
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
 
   // ====== Table list ======
   const [items, setItems] = useState([]);
@@ -65,17 +69,21 @@ export default function AdminQuotationsPage() {
       const { data } = await apiGet("/admin/quotations/pending", {
         page,
         pageSize: meta.pageSize || 10,
-        q,
+        q: q.trim(), // trim ก่อนยิง
       });
       const rows = data?.data || [];
       setItems(rows);
       setMeta(data?.meta || { page, pageSize: 10, total: rows.length });
 
+      // อัปเดต metric จากผลชุดที่โหลดมา
       const pending = rows.filter((x) => x.status === "PENDING").length;
       const approved = rows.filter((x) => x.status === "APPROVED").length;
       const rejected = rows.filter((x) => x.status === "REJECTED").length;
       const total = rows.length;
-      const conversion = pending + approved > 0 ? Math.round((approved / (pending + approved)) * 100) : null;
+      const conversion =
+        pending + approved > 0
+          ? Math.round((approved / (pending + approved)) * 100)
+          : null;
       setMetrics({ total, pending, approved, rejected, conversion });
     } finally {
       setLoading(false);
@@ -102,10 +110,16 @@ export default function AdminQuotationsPage() {
         setTargetReq(r1?.data || null);
 
         try {
-          const { data: r2 } = await apiGet(`/quotations/${rid}`, { latest: true });
+          const { data: r2 } = await apiGet(`/quotations/${rid}`, {
+            latest: true,
+          });
           setLatestQuote(r2?.data || null);
-          setUplPrice(r2?.data?.totalPrice != null ? String(r2.data.totalPrice) : "");
-          setUplValidUntil(r2?.data?.validUntil ? toISODate(new Date(r2.data.validUntil)) : "");
+          setUplPrice(
+            r2?.data?.totalPrice != null ? String(r2.data.totalPrice) : ""
+          );
+          setUplValidUntil(
+            r2?.data?.validUntil ? toISODate(new Date(r2.data.validUntil)) : ""
+          );
         } catch {
           setLatestQuote(null);
           setUplPrice("");
@@ -140,13 +154,18 @@ export default function AdminQuotationsPage() {
       const fd = new FormData();
       if (uplFile) fd.append("file", uplFile);
       if (uplPrice !== "") fd.append("totalPrice", uplPrice);
-      if (uplValidUntil) fd.append("validUntil", new Date(uplValidUntil).toISOString());
+      if (uplValidUntil)
+        fd.append("validUntil", new Date(uplValidUntil).toISOString());
 
       if (canCreate) {
-        await apiPost(`/quotations/${rid}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        await apiPost(`/quotations/${rid}`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
         toast.success("อัปโหลดใบเสนอราคาแล้ว");
       } else if (canEdit && latestQuote) {
-        await apiPatch(`/quotations/${latestQuote.id}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        await apiPatch(`/quotations/${latestQuote.id}`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
         toast.success("อัปเดตใบเสนอราคาแล้ว");
       } else {
         toast.error("สถานะปัจจุบันไม่อนุญาตให้อัปโหลด/แก้ไข");
@@ -157,7 +176,9 @@ export default function AdminQuotationsPage() {
       const { data: r1 } = await apiGet(`/requests/${rid}`);
       setTargetReq(r1?.data || null);
       try {
-        const { data: r2 } = await apiGet(`/quotations/${rid}`, { latest: true });
+        const { data: r2 } = await apiGet(`/quotations/${rid}`, {
+          latest: true,
+        });
         setLatestQuote(r2?.data || null);
       } catch {
         setLatestQuote(null);
@@ -170,20 +191,17 @@ export default function AdminQuotationsPage() {
     }
   };
 
+  // เหลือกรองแค่สถานะ (แท็บ) ฝั่ง FE — การค้นหาใช้ฝั่ง BE อยู่แล้ว
   const filteredRows = useMemo(() => {
     let rows = items;
     if (status) rows = rows.filter((r) => r.status === status);
-    if (dateFrom) rows = rows.filter((r) => new Date(r.createdAt) >= new Date(dateFrom));
-    if (dateTo) rows = rows.filter((r) => new Date(r.createdAt) <= new Date(dateTo + "T23:59:59"));
     return rows;
-  }, [items, status, dateFrom, dateTo]);
+  }, [items, status]);
 
   const onClearFilters = () => {
     setActiveTab("ALL");
     setStatus("");
     setQ("");
-    setDateFrom("");
-    setDateTo("");
     fetchList(1);
   };
 
@@ -218,7 +236,11 @@ export default function AdminQuotationsPage() {
     if (!requestIdParam) return null;
 
     if (loadingTarget) {
-      return <div className="rounded-lg border p-3">กำลังโหลดคำขอ #{requestIdParam} …</div>;
+      return (
+        <div className="rounded-lg border p-3">
+          กำลังโหลดคำขอ #{requestIdParam} …
+        </div>
+      );
     }
     if (!targetReq) {
       return (
@@ -249,7 +271,8 @@ export default function AdminQuotationsPage() {
               <div className="text-sm">
                 {latestQuote ? (
                   <>
-                    สถานะใบล่าสุด: {renderBadge(QUOTE_STATUS, latestQuote.status)}{" "}
+                    สถานะใบล่าสุด:{" "}
+                    {renderBadge(QUOTE_STATUS, latestQuote.status)}{" "}
                     {latestQuote.fileUrl && (
                       <>
                         •{" "}
@@ -295,7 +318,9 @@ export default function AdminQuotationsPage() {
                   </label>
 
                   <label className="block">
-                    <div className="text-sm text-gray-600 mb-1">ยอดรวม (บาท)</div>
+                    <div className="text-sm text-gray-600 mb-1">
+                      ยอดรวม (บาท)
+                    </div>
                     <input
                       className="border rounded px-3 py-2 w-full"
                       value={uplPrice}
@@ -322,7 +347,11 @@ export default function AdminQuotationsPage() {
                     disabled={saving}
                     onClick={onSubmitUpload}
                   >
-                    {saving ? "กำลังบันทึก..." : canCreate ? "ส่งใบเสนอราคา" : "อัปเดตใบเสนอราคา"}
+                    {saving
+                      ? "กำลังบันทึก..."
+                      : canCreate
+                      ? "ส่งใบเสนอราคา"
+                      : "อัปเดตใบเสนอราคา"}
                   </button>
                 </div>
               </>
@@ -344,7 +373,9 @@ export default function AdminQuotationsPage() {
         ].map((t) => (
           <button
             key={t.key}
-            className={`px-3 py-1.5 rounded border ${activeTab === t.key ? "bg-gray-900 text-white" : "hover:bg-gray-50"}`}
+            className={`px-3 py-1.5 rounded border ${
+              activeTab === t.key ? "bg-gray-900 text-white" : "hover:bg-gray-50"
+            }`}
             onClick={() => setActiveTab(t.key)}
           >
             {t.label}
@@ -354,41 +385,27 @@ export default function AdminQuotationsPage() {
 
       <div className="grid md:grid-cols-3 gap-2">
         <label className="block md:col-span-2">
-          <div className="text-xs text-gray-600 mb-1">ค้นหา (ชื่อคำขอ/ชื่อลูกค้า/อีเมล)</div>
+          <div className="text-xs text-gray-600 mb-1">
+            ค้นหา (ชื่อคำขอ/ชื่อลูกค้า/อีเมล)
+          </div>
           <input
             className="border rounded px-3 py-2 w-full"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="พิมพ์คำค้น… แล้วกดค้นหา"
+            onKeyDown={(e) => e.key === "Enter" && fetchList(1)}
+            placeholder="พิมพ์คำค้น… แล้วกด Enter หรือปุ่มค้นหา"
           />
         </label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block">
-            <div className="text-xs text-gray-600 mb-1">จากวันที่</div>
-            <input
-              type="date"
-              className="border rounded px-2 py-2 w-full"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <div className="text-xs text-gray-600 mb-1">ถึงวันที่</div>
-            <input
-              type="date"
-              className="border rounded px-2 py-2 w-full"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
-        </div>
       </div>
 
       <div className="flex justify-between">
         <button className="px-3 py-2 rounded border" onClick={onClearFilters}>
           ล้างตัวกรอง
         </button>
-        <button className="px-3 py-2 rounded bg-black text-white" onClick={() => fetchList(1)}>
+        <button
+          className="px-3 py-2 rounded bg-black text-white"
+          onClick={() => fetchList(1)}
+        >
           ค้นหา
         </button>
       </div>
@@ -427,7 +444,22 @@ export default function AdminQuotationsPage() {
       key: "validUntil",
       header: "ใช้ได้ถึง",
       render: (r) =>
-        r.validUntil ? new Date(r.validUntil).toLocaleDateString("th-TH") : "-",
+        (() => {
+          if (!r.validUntil) return "—";
+          const d = new Date(r.validUntil);
+          const now = new Date();
+          const daysLeft = Math.ceil((d - now) / 86400000);
+          const dateText = d.toLocaleDateString("th-TH");
+          if (d < now)
+            return <span className="text-red-600">{dateText} • หมดอายุแล้ว</span>;
+          if (daysLeft <= 7)
+            return (
+              <span className="text-amber-700">
+                {dateText} • เหลือ {daysLeft} วัน
+              </span>
+            );
+          return dateText;
+        })(),
     },
     {
       key: "status",
@@ -450,7 +482,6 @@ export default function AdminQuotationsPage() {
               เปิดไฟล์
             </a>
           )}
-          {/* ⬇️ เปลี่ยนจาก navigate → เปิด Drawer พร้อม RequestDetail */}
           <button
             className="px-2 py-1 rounded border hover:bg-gray-50"
             title="ไปยังคำขอ (ดูรายละเอียด)"
@@ -464,7 +495,9 @@ export default function AdminQuotationsPage() {
           <button
             className="px-2 py-1 rounded border hover:bg-gray-50"
             title="ไปนัดหมายของคำขอนี้"
-            onClick={() => router.push(`/admin/site-visits?requestId=${r.request?.id || ""}`)}
+            onClick={() =>
+              router.push(`/admin/site-visits?requestId=${r.request?.id || ""}`)
+            }
           >
             นัดหมาย
           </button>
@@ -473,7 +506,10 @@ export default function AdminQuotationsPage() {
     },
   ];
 
-  const totalPages = Math.max(1, Math.ceil((filteredRows.length || 0) / (meta.pageSize || 10)));
+  const totalPages = Math.max(
+    1,
+    Math.ceil((filteredRows.length || 0) / (meta.pageSize || 10))
+  );
 
   return (
     <AdminGuard>
@@ -528,8 +564,7 @@ export default function AdminQuotationsPage() {
         {openDetail && detailId && (
           <RequestDetail
             requestId={detailId}
-            onUploadQuotation={(reqRow, opts) => {
-              // เปิดบริบทอัปโหลดบนหน้านี้เลย
+            onUploadQuotation={(reqRow) => {
               setOpenDetail(false);
               router.push(`/admin/quotations?requestId=${reqRow.id}`);
             }}

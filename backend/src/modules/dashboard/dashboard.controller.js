@@ -1,5 +1,6 @@
-// src/modules/dashboard/dashboard.controller.js
+// backend/src/modules/dashboard/dashboard.controller.js
 const prisma = require('../../config/prisma');
+const DEV = process.env.NODE_ENV !== 'production'; // CHANGED: กัน ReferenceError ถ้าอ้าง DEV ด้านล่าง
 
 /**
  * GET /api/admin/overview
@@ -53,81 +54,6 @@ exports.overview = async (req, res) => {
 };
 
 /**
- * GET /api/admin/requests/recent
- * Query: page=1&pageSize=20&status=...&q=keyword&categoryId&dateFrom&dateTo&sort=createdAt:desc
- */
-// exports.recentRequests = async (req, res) => {
-//   try {
-//     const {
-//       page = 1,
-//       pageSize = 20,
-//       status,
-//       q,
-//       categoryId,
-//       dateFrom,
-//       dateTo,
-//       sort = 'createdAt:desc'
-//     } = req.query || {};
-
-//     const take = Math.max(1, Math.min(100, Number(pageSize)));
-//     const skip = Math.max(0, (Number(page) - 1) * take);
-//     const [sortField, sortDir] = String(sort).split(':');
-
-//     const where = {};
-//     if (status) where.status = status;
-//     if (categoryId) where.categoryId = Number(categoryId);
-//     if (q) {
-//       const kw = String(q);
-//       where.OR = [
-//         { title:            { contains: kw } },
-//         { description:      { contains: kw } },
-//         { contactEmail:     { contains: kw } },
-//         { contactFirstName: { contains: kw } },
-//         { contactLastName:  { contains: kw } },
-//       ];
-//     }
-//     if (dateFrom || dateTo) {
-//       const gte = dateFrom ? new Date(dateFrom) : undefined;
-//       const lte = dateTo   ? new Date(dateTo)   : undefined;
-//       where.createdAt = { ...(gte && { gte }), ...(lte && { lte }) };
-//     }
-
-//     const [items, total] = await Promise.all([
-//       prisma.serviceRequest.findMany({
-//         where,
-//         orderBy: { [sortField || 'createdAt']: (sortDir === 'asc' ? 'asc' : 'desc') },
-//         skip, take,
-//         select: {
-//           id: true, title: true, status: true, createdAt: true,
-//           district: true, province: true,
-//           categoryId: true,
-//           category: { select: { id: true, name: true } },
-//           customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }
-//         }
-//       }),
-//       prisma.serviceRequest.count({ where })
-//     ]);
-
-//     const enhanced = items.map((x) => ({
-//       ...x,
-//       displayCustomerName: x.customer
-//         ? `${x.customer.firstName} ${x.customer.lastName}`.trim()
-//         : '-',
-//       shortAddress: [x.district, x.province].filter(Boolean).join(', ') || null,
-//     }));
-
-//     return res.json({
-//       status: 'ok',
-//       data: enhanced,
-//       meta: { page: Number(page), pageSize: take, total, totalPages: Math.ceil(total / take) }
-//     });
-//   } catch (e) {
-//     console.error('recentRequests error:', e);
-//     return res.status(500).json({ status: 'error', message: 'Server error' });
-//   }
-// };
-
-/**
  * GET /api/admin/site-visits/upcoming
  * Query:
  *   - ช่วงเวลา: days (default 14) หรือ dateFrom + dateTo (ISO)
@@ -169,15 +95,15 @@ exports.upcomingVisits = async (req, res) => {
       ...(requestId ? { requestId: Number(requestId) } : {}),
     };
 
-    // --- เงื่อนไขฝั่ง request (สำคัญ: ต้อง { is: ... }) ---
+    // --- เงื่อนไขฝั่ง request (สำคัญ: ต้อง { is: ... })
     const requestFilter = {};
     if (customerId) requestFilter.customerId = Number(customerId);
     if (q && String(q).trim()) {
       const kw = String(q).trim();
       requestFilter.OR = [
-        { title: { contains: kw, mode: 'insensitive' } },
-        { customer: { is: { firstName: { contains: kw, mode: 'insensitive' } } } },
-        { customer: { is: { lastName:  { contains: kw, mode: 'insensitive' } } } },
+        { title: { contains: kw } },                                    // CHANGED: ลบ mode
+        { customer: { is: { firstName: { contains: kw } } } },          // CHANGED: ลบ mode
+        { customer: { is: { lastName:  { contains: kw } } } },          // CHANGED: ลบ mode
       ];
     }
     if (Object.keys(requestFilter).length > 0) {
@@ -195,7 +121,7 @@ exports.upcomingVisits = async (req, res) => {
         include: {
           request: {
             select: {
-              id: true, title: true, status: true, customerId: true,
+              id: true, publicRef: true, title: true, status: true, customerId: true,
               customer: { select: { firstName: true, lastName: true, phone: true, email: true } }
             }
           }
@@ -235,7 +161,7 @@ exports.upcomingVisits = async (req, res) => {
     console.error('upcomingVisits error >>>', e);
     // 4) ส่งรายละเอียดกลับ *เฉพาะ dev* เพื่อวิเคราะห์หน้า FE ได้เลย
     const payload = { status: 'error', message: 'Server error' };
-    if (DEV) {
+    if (DEV) { // CHANGED: ใช้ DEV ที่เรากำหนดไว้ข้างบน
       payload.debug = {
         name: e?.name,
         code: e?.code,
@@ -264,10 +190,10 @@ exports.pendingQuotations = async (req, res) => {
       where.request = {
         is: {
           OR: [
-            { title: { contains: kw } },
-            { customer: { is: { email:     { contains: kw } } } },
-            { customer: { is: { firstName: { contains: kw } } } },
-            { customer: { is: { lastName:  { contains: kw } } } },
+            { title: { contains: kw } },                               // CHANGED: ลบ mode
+            { customer: { is: { email:     { contains: kw } } } },     // CHANGED:
+            { customer: { is: { firstName: { contains: kw } } } },     // CHANGED:
+            { customer: { is: { lastName:  { contains: kw } } } },     // CHANGED:
           ]
         }
       };

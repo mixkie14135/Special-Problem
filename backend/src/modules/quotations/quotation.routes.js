@@ -17,7 +17,7 @@ router.get('/quotations/:requestId(\\d+)', requireAuth, ctrl.getByRequest);
 router.get('/quotations', requireAuth, requireAdmin, ctrl.listAll);
 
 // Customer
-router.post('/quotations/:id(\\d+)c/decision', requireAuth, requireCustomerOwnsQuotation, ctrl.decision);
+router.post('/quotations/:id(\\d+)/decision', requireAuth, requireCustomerOwnsQuotation, ctrl.decision);
 
 // (ออปชัน) ลูกค้าดูของตัวเองทั้งหมด
 router.get('/my/quotations', requireAuth, ctrl.listMine);

@@ -76,7 +76,7 @@ model ServiceCategory {
 model ServiceRequest {
   id               Int       @id @default(autoincrement())
   title            String
-  description      String
+  description      String    @db.Text    // ⬅️ อนุญาตยาว
   status           RequestStatus @default(NEW)
   createdAt        DateTime  @default(now())
 
@@ -96,7 +96,7 @@ model ServiceRequest {
   longitude        Float?
   placeName        String?
   formattedAddress String?
-  addressLine      String?
+  addressLine      String?      @db.Text
   subdistrict      String?
   district         String?
   province         String?
@@ -106,6 +106,8 @@ model ServiceRequest {
   siteVisits       SiteVisit[]
   quotations       Quotation[]
   images           RequestImage[]
+
+  publicRef        String?        @unique @db.VarChar(32) // ← ใหม่
 
   @@index([status])
   @@index([createdAt])

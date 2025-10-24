@@ -1,6 +1,8 @@
-// src/app/admin/requests/page.js
+// frontend/src/app/admin/requests/page.js
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
 import AdminGuard from "@/components/admin/AdminGuard";
 import Table from "@/components/admin/Table";
@@ -9,13 +11,13 @@ import AdminDrawer from "@/components/admin/AdminDrawer";
 import RequestDetail from "@/components/admin/RequestDetail";
 import { toast, Toaster } from "sonner";
 import { REQUEST_STATUS, renderBadge } from "@/lib/statusLabels";
-import { useRouter } from "next/navigation";
+import { Clipboard } from "lucide-react";
 
 export default function AdminRequestsPage() {
   const router = useRouter();
 
   const [items, setItems] = useState([]);
-  const [meta, setMeta] = useState({ page: 1, pageSize: 20, total: 0 });
+  const [meta, setMeta] = useState({ page: 1, pageSize: 10, total: 0 });
   const [loading, setLoading] = useState(false);
 
   // filters
@@ -46,37 +48,80 @@ export default function AdminRequestsPage() {
   const [openDetail, setOpenDetail] = useState(false);
   const [detailId, setDetailId] = useState(null);
 
-  // แนวทาง A: อนุญาตส่งใบเสนอราคาเฉพาะตอนสถานะ SURVEY_DONE
-  const canQuote = useMemo(() => (r) => r.status === "SURVEY_DONE", []);
+  // FE gate แบบหลวม (ยังคงตรวจจริงที่ BE)
+  const canShowQuoteButton = (r) => r.status === "SURVEY_DONE";
 
-  const fetchData = async (page = 1) => {
+  async function fetchData(page = 1) {
     setLoading(true);
     try {
       const { data } = await apiGet("/admin/requests/recent", {
         page,
-        pageSize: 10,
+        pageSize: meta.pageSize || 10,
         q,
         status,
         sort,
       });
-      setItems(data.data || []);
-      setMeta(data.meta || { page, pageSize: 10, total: 0 });
+      setItems(data?.data || []);
+      setMeta(data?.meta || { page, pageSize: 10, total: 0 });
+    } catch (e) {
+      toast.error(e?.response?.data?.message || "โหลดรายการไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   useEffect(() => {
     fetchData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function openUpload(reqRow, { isEdit = false } = {}) {
+  // ----- Pre-check ก่อนเปิด modal อัปโหลดใบเสนอราคา -----
+  // ต้องมีนัดล่าสุด + ลูกค้า APPROVED + นัด DONE (ตรงตาม backend)
+  async function precheckReadyToQuote(requestId) {
+    try {
+      const { data } = await apiGet(`/requests/${requestId}`); // admin detail
+      const req = data?.data;
+      if (!req) return { ok: false, reason: "ไม่พบคำขอ" };
+
+      // หา visit ล่าสุด (ตาม controller รายละเอียดส่งเรียงเวลาอยู่แล้ว แต่กันพลาด)
+      const visits = Array.isArray(req.siteVisits) ? req.siteVisits : [];
+      if (!visits.length) {
+        return { ok: false, reason: "ยังไม่มีนัดหมายดูหน้างาน" };
+      }
+      const latest = [...visits].sort(
+        (a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt)
+      )[0];
+
+      if (latest.customerResponse !== "APPROVED") {
+        return { ok: false, reason: "ลูกค้ายังไม่ยืนยันนัดหมาย (ต้อง APPROVED)" };
+      }
+      if (latest.status !== "DONE") {
+        return { ok: false, reason: "ยังไม่ได้ทำการดูหน้างานให้เสร็จ (ต้อง DONE)" };
+      }
+      return { ok: true, latest };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: e?.response?.data?.message || "ตรวจสอบเงื่อนไขไม่สำเร็จ",
+      };
+    }
+  }
+
+  async function openUpload(reqRow, { isEdit = false } = {}) {
     setTargetReq(reqRow);
     setFile(null);
     setPrice("");
     setValidUntil("");
     setModalMode(isEdit ? "edit" : "create");
+
+    // ทำ pre-check เมื่อเป็นการ "ส่ง" ใหม่ (ตอนแก้ไขปล่อยผ่าน)
+    if (!isEdit) {
+      const check = await precheckReadyToQuote(reqRow.id);
+      if (!check.ok) {
+        toast.error(check.reason);
+        return;
+      }
+    }
     setModalOpen(true);
   }
 
@@ -98,14 +143,34 @@ export default function AdminRequestsPage() {
       setModalOpen(false);
       fetchData(meta.page);
     } catch (e) {
+      // สะท้อนข้อความ guard จาก backend ให้แอดมินเห็น
       toast.error(e?.response?.data?.message || "อัปโหลดไม่สำเร็จ");
     } finally {
       setUploading(false);
     }
   }
 
+  // ----- ตาราง -----
   const columns = [
-    { key: "id", header: "ID" },
+    {
+      key: "publicRef",
+      header: "เลขอ้างอิง",
+      render: (r) => (
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm">{r.publicRef || `#${r.id}`}</span>
+          <button
+            className="p-1 rounded hover:bg-gray-100"
+            title="คัดลอกเลขอ้างอิง"
+            onClick={() => {
+              navigator.clipboard.writeText(r.publicRef || String(r.id));
+              toast.success("คัดลอกแล้ว");
+            }}
+          >
+            <Clipboard size={14} />
+          </button>
+        </div>
+      ),
+    },
     { key: "title", header: "หัวข้อ" },
     {
       key: "status",
@@ -121,33 +186,32 @@ export default function AdminRequestsPage() {
     {
       key: "createdAt",
       header: "สร้างเมื่อ",
-      render: (r) => new Date(r.createdAt).toLocaleString("th-TH"),
+      render: (r) =>
+        r.createdAt ? new Date(r.createdAt).toLocaleString("th-TH") : "-",
     },
     {
       key: "actions",
       header: "จัดการ",
       render: (r) => (
         <div className="flex gap-2 justify-end">
-          {/* ดูรายละเอียด */}
           <button
             className="px-3 py-1.5 rounded border hover:bg-gray-50"
             onClick={() => {
               setDetailId(r.id);
               setOpenDetail(true);
             }}
-            title="ดูรายละเอียดคำขอ"
+            title={`ดูรายละเอียด ${r.publicRef || `#${r.id}`}`}
           >
             ดูรายละเอียด
           </button>
 
-          {/* ปุ่มส่งใบเสนอราคา (แนวทาง A: เฉพาะ SURVEY_DONE) */}
           <button
             className="px-3 py-1.5 rounded border hover:bg-gray-50 disabled:opacity-50"
-            disabled={!canQuote(r)}
+            disabled={!canShowQuoteButton(r)}
             onClick={() => openUpload(r, { isEdit: false })}
             title={
-              canQuote(r)
-                ? "ส่งใบเสนอราคา (PDF)"
+              canShowQuoteButton(r)
+                ? `ส่งใบเสนอราคาให้ ${r.publicRef || `#${r.id}`}`
                 : "ต้องสถานะ 'ดูหน้างานเสร็จ' ก่อน"
             }
           >
@@ -174,7 +238,8 @@ export default function AdminRequestsPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นคำขอ/อีเมลลูกค้า..."
+            onKeyDown={(e) => e.key === "Enter" && fetchData(1)}
+            placeholder="ค้นหัวข้อ/อีเมล/โทร/ชื่อลูกค้า หรือเลขอ้างอิง (เช่น REQ-202510-00012)"
             className="border rounded px-3 py-2"
           />
 
@@ -208,7 +273,11 @@ export default function AdminRequestsPage() {
           </button>
         </div>
 
-        {loading ? <p>กำลังโหลด...</p> : <Table columns={columns} data={items} />}
+        {loading ? (
+          <p>กำลังโหลด...</p>
+        ) : (
+          <Table columns={columns} data={items} />
+        )}
 
         {/* Pagination */}
         <div className="flex items-center justify-end gap-2">
@@ -238,7 +307,9 @@ export default function AdminRequestsPage() {
         onClose={() => setModalOpen(false)}
         title={`${
           modalMode === "edit" ? "แก้ไขใบเสนอราคา" : "ส่งใบเสนอราคา"
-        } ให้คำขอ #${targetReq?.id ?? "-"} (${targetReq?.title ?? ""})`}
+        } ให้คำขอ ${targetReq?.publicRef || `#${targetReq?.id ?? "-"}`} (${
+          targetReq?.title ?? ""
+        })`}
         footer={
           <div className="flex justify-end gap-2">
             <button
@@ -264,9 +335,7 @@ export default function AdminRequestsPage() {
       >
         <div className="space-y-3">
           <div>
-            <label className="block text-sm mb-1">
-              ไฟล์ใบเสนอราคา (PDF) *
-            </label>
+            <label className="block text-sm mb-1">ไฟล์ใบเสนอราคา (PDF) *</label>
             <input
               type="file"
               accept="application/pdf"
@@ -293,8 +362,8 @@ export default function AdminRequestsPage() {
           </div>
           {targetReq?.status !== "SURVEY_DONE" && (
             <p className="text-xs text-amber-700">
-              ต้องเปลี่ยนสถานะนัดหมายเป็น <strong>SURVEY_DONE</strong>{" "}
-              ก่อนจึงจะส่งใบเสนอราคาได้ (ระบบ backend จะตรวจอีกรอบ)
+              ต้องเปลี่ยนสถานะนัดหมายเป็น <strong>SURVEY_DONE</strong> ก่อนจึงจะส่งใบเสนอราคาได้
+              (ระบบฝั่งเซิร์ฟเวอร์จะตรวจอีกครั้งว่าลูกค้า APPROVED และนัด DONE แล้ว)
             </p>
           )}
         </div>
@@ -304,7 +373,9 @@ export default function AdminRequestsPage() {
       <AdminDrawer
         open={openDetail}
         onClose={() => setOpenDetail(false)}
-        title={`รายละเอียดคำขอ #${detailId ?? "-"}`}
+        title={`รายละเอียดคำขอ ${
+          items.find((x) => x.id === detailId)?.publicRef || `#${detailId ?? "-"}`
+        }`}
         widthClass="w-full max-w-3xl"
       >
         {detailId && (
@@ -314,11 +385,20 @@ export default function AdminRequestsPage() {
               setOpenDetail(false);
               setTargetReq({
                 id: reqRow.id,
+                publicRef: reqRow.publicRef,
                 title: reqRow.title,
                 status: reqRow.status,
               });
               setModalMode(opts?.isEdit ? "edit" : "create");
-              setModalOpen(true);
+              openUpload(
+                {
+                  id: reqRow.id,
+                  publicRef: reqRow.publicRef,
+                  title: reqRow.title,
+                  status: reqRow.status,
+                },
+                { isEdit: !!opts?.isEdit }
+              );
             }}
             onGotoSiteVisits={(rid) => {
               setOpenDetail(false);

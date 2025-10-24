@@ -1,3 +1,4 @@
+// frontend/src/components/nav/PublicNavbar.jsx
 "use client";
 import Link from "next/link";
 import Image from "next/image";

@@ -20,7 +20,7 @@ function makeStorage(subdir) {
 }
 
 const MAX_MB = Number(process.env.UPLOAD_MAX_FILE_MB || 10);
-const ALLOWED_IMG = (process.env.UPLOAD_ALLOWED_IMAGE || 'jpg,jpeg,png,webp')
+const ALLOWED_IMG = (process.env.UPLOAD_ALLOWED_IMAGE || 'jpg,jpeg,png,webp,svg')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const ALLOWED_DOC = (process.env.UPLOAD_ALLOWED_DOC || 'pdf')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);

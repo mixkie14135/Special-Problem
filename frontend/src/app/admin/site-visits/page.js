@@ -10,12 +10,24 @@ import SiteVisitDetail from "@/components/admin/SiteVisitDetail";
 import { toast, Toaster } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import { VISIT_STATUS, VISIT_RESPONSE, renderBadge } from "@/lib/statusLabels";
+import { Clipboard } from "lucide-react";
 
 function toLocalDatetimeValue(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
     d.getHours()
   )}:${pad(d.getMinutes())}`;
+}
+
+// --- helper: แปลง input “Request ID หรือ PublicRef” เป็นเลข id (ถ้าแปลงได้) --- // CHANGED:
+function coerceRequestId(v) { // CHANGED:
+  if (!v) return ""; // CHANGED:
+  const s = String(v).trim(); // CHANGED:
+  if (/^\d+$/.test(s)) return String(Number(s)); // normalize leading zero // CHANGED:
+  // publicRef format: REQ-YYYYMM-00001 → id = 1 (เลขท้าย 5 หลัก) // CHANGED:
+  const m = /^REQ-\d{6}-(\d{5})$/i.exec(s); // CHANGED:
+  if (m) return String(Number(m[1])); // CHANGED:
+  return ""; // ไม่รู้จักรูปแบบ → ไม่ส่ง requestId ไป backend // CHANGED:
 }
 
 export default function AdminSiteVisitsPage() {
@@ -31,7 +43,7 @@ export default function AdminSiteVisitsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [q, setQ] = useState("");
-  const [requestId, setRequestId] = useState(initialRequestId);
+  const [requestId, setRequestId] = useState(initialRequestId); // สำหรับกรณีมาจากลิงก์ (ยังแสดงที่ส่วนหัว)
 
   // ===== Data =====
   const [items, setItems] = useState([]);
@@ -55,7 +67,7 @@ export default function AdminSiteVisitsPage() {
   const [openDetail, setOpenDetail] = useState(false);
   const [detailId, setDetailId] = useState(null);
 
-  // ตัวเลือก "สถานะนัด" ใช้ป้ายไทยจาก VISIT_STATUS แต่ value เป็น key อังกฤษ
+  // ตัวเลือก “สถานะนัด”
   const visitStatusOptions = useMemo(
     () => [
       { value: "", label: "ทั้งหมด" },
@@ -67,7 +79,7 @@ export default function AdminSiteVisitsPage() {
     []
   );
 
-  // ทำ flag "ล่าสุด" ฝั่ง UI จากผลลัพธ์ที่โหลดมา
+  // ทำ flag “นัดล่าสุดของคำขอ”
   const stampLatestFlag = useCallback((rows) => {
     const byReq = new Map();
     for (const r of rows) {
@@ -85,14 +97,29 @@ export default function AdminSiteVisitsPage() {
     }));
   }, []);
 
-  const load = useCallback(
-    async (page = 1) => {
+  // โหลดข้อมูล (รวม logic แยกแยะ q เป็น text หรือ publicRef/ID) // CHANGED:
+  const load = useCallback( // CHANGED:
+    async (page = 1) => { // CHANGED:
       setLoading(true);
       try {
         const p = { page, pageSize: 10 };
         if (status) p.status = status;
-        if (q) p.q = q;
-        if (requestId) p.requestId = requestId;
+
+        // ใช้ช่องเดียว: ถ้า q เป็น ID/REF → ส่งเป็น requestId, ถ้าเป็นข้อความ → ส่ง q
+        const kw = q.trim();                 // CHANGED:
+        if (kw) {                            // CHANGED:
+          if (/^REQ-\d{6}-\d{5}$/i.test(kw)) {               // CHANGED:
+            p.requestId = String(Number(kw.slice(-5)));       // CHANGED:
+          } else if (/^\d+$/.test(kw)) {                      // CHANGED:
+            p.requestId = String(Number(kw));                 // CHANGED:
+          } else {                                            // CHANGED:
+            p.q = kw;                                         // CHANGED:
+          }                                                   // CHANGED:
+        }                                                      // CHANGED:
+
+        // รองรับ requestId จาก query string (เช่นมาจากหน้า RequestDetail)
+        const ridFromParam = coerceRequestId(requestId); // CHANGED:
+        if (ridFromParam && !p.requestId) p.requestId = ridFromParam; // CHANGED:
 
         if (useCustomRange) {
           if (dateFrom) p.dateFrom = dateFrom;
@@ -101,31 +128,52 @@ export default function AdminSiteVisitsPage() {
           p.days = quickDays;
         }
 
+        console.log("[FE] load site-visits params =", p);
         const { data } = await apiGet("/admin/site-visits/upcoming", p);
         const rows = data?.data || [];
+        console.log("[FE] loaded site-visits count =", rows.length);
         setItems(stampLatestFlag(rows));
         setMeta(data?.meta || { page, pageSize: 10, total: 0 });
-      } catch {
+
+        // กรณีมากับ requestId & autoNew=1 แล้ว “ยังไม่มีนัด” → เปิดสร้างอัตโนมัติ
+        if (page === 1 && autoNew && (p.requestId || ridFromParam) && rows.length === 0) { // CHANGED:
+          const ridToUse = p.requestId || ridFromParam; // CHANGED:
+          console.log("[FE] autoNew=1 → open create modal (no visits yet)");
+          setCreateRequestId(ridToUse); // เก็บเป็นเลข id ที่ normalize แล้ว // CHANGED:
+          setCreateWhen(toLocalDatetimeValue(new Date(Date.now() + 24 * 3600 * 1000))); // +1 วัน
+          setOpenCreate(true);
+        }
+      } catch (e) {
+        console.error("[FE] site-visits load failed:", e?.response?.data || e?.message);
         setItems([]);
         setMeta({ page: 1, pageSize: 10, total: 0 });
       } finally {
         setLoading(false);
       }
     },
-    [status, q, requestId, useCustomRange, dateFrom, dateTo, quickDays, stampLatestFlag]
+    [
+      status,
+      q,                // CHANGED:
+      requestId,        // CHANGED:
+      useCustomRange,
+      dateFrom,
+      dateTo,
+      quickDays,
+      autoNew,
+      stampLatestFlag,
+    ]
   );
 
   // initial load
   useEffect(() => {
     load(1);
-    // auto open create (ครั้งแรกจากหน้า RequestDetail)
     if (initialRequestId && autoNew) {
-      setOpenCreate(true);
+      console.log("[FE] initial autoNew=1 → will open create modal if no visits after load");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // กด Enter ในช่องค้นหาให้ยิงค้นหา
+  // Enter เพื่อค้นหาเร็ว
   const onKeyDownSearch = (e) => {
     if (e.key === "Enter") load(1);
   };
@@ -135,19 +183,36 @@ export default function AdminSiteVisitsPage() {
       { header: "ID", key: "id", width: 64, headerClassName: "w-16" },
       {
         header: "คำขอ",
-        render: (r) => (
-          <div className="flex flex-col">
-            <span className="font-medium">
-              #{r.request?.id} — {r.request?.title}
-            </span>
-            <span className="text-xs text-gray-500">
-              ลูกค้า:{" "}
-              {r.request?.customer
-                ? `${r.request.customer.firstName} ${r.request.customer.lastName}`
-                : "-"}
-            </span>
-          </div>
-        ),
+        render: (r) => {
+          const ref = r.request?.publicRef || (r.request?.id ? `#${r.request.id}` : "-");
+          return (
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{ref}</span>
+                {!!r.request?.publicRef && (
+                  <button
+                    className="p-1 rounded hover:bg-gray-100"
+                    title="คัดลอกเลขอ้างอิง"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      navigator.clipboard.writeText(r.request.publicRef);
+                      toast.success("คัดลอกเลขอ้างอิงแล้ว");
+                    }}
+                  >
+                    <Clipboard size={14} />
+                  </button>
+                )}
+              </div>
+              <span className="text-sm text-gray-800">{r.request?.title || "-"}</span>
+              <span className="text-xs text-gray-500">
+                ลูกค้า:{" "}
+                {r.request?.customer
+                  ? `${r.request.customer.firstName} ${r.request.customer.lastName}`
+                  : "-"}
+              </span>
+            </div>
+          );
+        },
       },
       {
         header: "วัน–เวลา",
@@ -198,7 +263,8 @@ export default function AdminSiteVisitsPage() {
             </button>
             <button
               className="px-2 py-1 rounded border hover:bg-gray-50"
-              onClick={() => {
+              onClick={(ev) => {
+                ev.stopPropagation();
                 setSelected(r);
                 setWhen(toLocalDatetimeValue(new Date(r.scheduledAt)));
                 setNewStatus(r.status);
@@ -210,9 +276,10 @@ export default function AdminSiteVisitsPage() {
             </button>
             <button
               className="px-2 py-1 rounded border hover:bg-gray-50"
-              onClick={() =>
-                router.push(`/admin/quotations?requestId=${r.request?.id}`)
-              }
+              onClick={(ev) => {
+                ev.stopPropagation();
+                router.push(`/admin/quotations?requestId=${r.request?.id}`);
+              }}
               title="ไปหน้าใบเสนอราคาของคำขอนี้"
             >
               ใบเสนอราคา
@@ -231,11 +298,13 @@ export default function AdminSiteVisitsPage() {
       const payload = {};
       if (when) payload.scheduledAt = new Date(when).toISOString();
       if (newStatus) payload.status = newStatus;
+      console.log("[FE] PATCH /admin/site-visits/%s payload=", selected.id, payload);
       await apiPatch(`/admin/site-visits/${selected.id}`, payload);
       toast.success("บันทึกการแก้ไขแล้ว");
       setOpenEdit(false);
       await load(meta.page);
     } catch (e) {
+      console.error("[FE] update failed:", e?.response?.data || e?.message);
       toast.error(e?.response?.data?.message || "อัปเดตไม่สำเร็จ");
     } finally {
       setSaving(false);
@@ -245,21 +314,24 @@ export default function AdminSiteVisitsPage() {
   const onCreate = async () => {
     setCreating(true);
     try {
-      if (!createRequestId) {
-        toast.error("กรุณาระบุ Request ID");
+      const rid = coerceRequestId(createRequestId); // CHANGED:
+      if (!rid) {
+        toast.error("กรุณาระบุ Request ID (เลข) หรือเลขอ้างอิงรูปแบบ REQ-YYYYMM-00001"); // CHANGED:
         setCreating(false);
         return;
       }
       const payload = {
-        requestId: Number(createRequestId),
+        requestId: Number(rid), // CHANGED:
         scheduledAt: new Date(createWhen).toISOString(),
       };
+      console.log("[FE] POST /admin/site-visits payload=", payload);
       await apiPost("/admin/site-visits", payload);
       toast.success("สร้างนัดหมายสำเร็จ");
       setOpenCreate(false);
       setCreateWhen(toLocalDatetimeValue());
       await load(1);
     } catch (e) {
+      console.error("[FE] create failed:", e?.response?.data || e?.message);
       toast.error(e?.response?.data?.message || "สร้างนัดไม่สำเร็จ");
     } finally {
       setCreating(false);
@@ -267,14 +339,19 @@ export default function AdminSiteVisitsPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil((meta.total || 0) / (meta.pageSize || 10)));
-  const canPrev = meta.page > 1;
-  const canNext = meta.page < totalPages;
 
   return (
     <AdminGuard>
       <Toaster richColors />
       <div className="space-y-4">
-        <h1 className="text-xl font-semibold">ปฏิทินนัดหมายหน้างาน</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">ปฏิทินนัดหมายหน้างาน</h1>
+          {requestId ? (
+            <div className="text-sm text-gray-600">
+              กรองตามคำขอ: <span className="font-mono">{requestId}</span>
+            </div>
+          ) : null}
+        </div>
 
         {/* Filters */}
         <div className="rounded-lg border p-3">
@@ -295,19 +372,6 @@ export default function AdminSiteVisitsPage() {
               </select>
             </label>
 
-            {/* กรองตามคำขอ */}
-            <label className="block">
-              <div className="text-xs text-gray-600 mb-1">กรองตามคำขอ (Request ID)</div>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                value={requestId}
-                onChange={(e) => setRequestId(e.target.value)}
-                placeholder="เช่น 123"
-                inputMode="numeric"
-                onKeyDown={onKeyDownSearch}
-              />
-            </label>
-
             {/* ช่วงเวลา */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -317,7 +381,9 @@ export default function AdminSiteVisitsPage() {
                   checked={useCustomRange}
                   onChange={(e) => setUseCustomRange(e.target.checked)}
                 />
-                <label htmlFor="useCustom" className="text-sm">กำหนดช่วงวันเอง</label>
+                <label htmlFor="useCustom" className="text-sm">
+                  กำหนดช่วงวันเอง
+                </label>
               </div>
               {useCustomRange ? (
                 <div className="flex gap-2">
@@ -339,7 +405,9 @@ export default function AdminSiteVisitsPage() {
                   {[7, 14, 30].map((d) => (
                     <button
                       key={d}
-                      className={`px-3 py-1.5 rounded border ${quickDays === d ? "bg-gray-900 text-white" : "hover:bg-gray-50"}`}
+                      className={`px-3 py-1.5 rounded border ${
+                        quickDays === d ? "bg-gray-900 text-white" : "hover:bg-gray-50"
+                      }`}
                       onClick={() => setQuickDays(d)}
                     >
                       {d} วัน
@@ -349,15 +417,19 @@ export default function AdminSiteVisitsPage() {
               )}
             </div>
 
-            {/* ค้นหา (หัวข้อ/ชื่อลูกค้า) */}
-            <label className="block md:col-span-3">
-              <div className="text-xs text-gray-600 mb-1">ค้นหา (หัวข้อคำขอ/ชื่อลูกค้า)</div>
+            {/* ค้นหา (ช่องเดียว ครอบคลุม ID/เลขอ้างอิง/ข้อความ) */} {/* CHANGED: */}
+            <label className="block md:col-span-3"> {/* CHANGED: */}
+              <div className="text-xs text-gray-600 mb-1">
+                ค้นหา (หัวข้อคำขอ/ชื่อลูกค้า/เลขอ้างอิง/Request ID) {/* CHANGED: */}
+              </div>
               <input
                 className="border rounded px-3 py-2 w-full"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                onKeyDown={onKeyDownSearch}
-                placeholder="พิมพ์คำค้น… แล้วกด Enter"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") load(1);
+                }}
+                placeholder="พิมพ์คำค้น เช่น REQ-202510-00001 หรือชื่อ/คำขอ แล้วกด Enter"
               />
             </label>
           </div>
@@ -371,7 +443,7 @@ export default function AdminSiteVisitsPage() {
                 setUseCustomRange(false);
                 setDateFrom("");
                 setDateTo("");
-                setQ("");
+                setQ("");                            // CHANGED:
                 setRequestId(initialRequestId || "");
               }}
               title="ล้างตัวกรองทั้งหมด"
@@ -404,18 +476,21 @@ export default function AdminSiteVisitsPage() {
         {/* Pagination */}
         <div className="flex items-center justify-end gap-2">
           <span className="text-sm text-gray-600">
-            {meta.total} รายการ • หน้า {meta.page} / {totalPages}
+            {meta.total} รายการ • หน้า {meta.page} / {Math.max(
+              1,
+              Math.ceil((meta.total || 0) / (meta.pageSize || 10))
+            )}
           </span>
           <button
             className="px-3 py-1 border rounded disabled:opacity-50"
-            disabled={!canPrev}
+            disabled={meta.page <= 1}
             onClick={() => load(meta.page - 1)}
           >
             ก่อนหน้า
           </button>
           <button
             className="px-3 py-1 border rounded disabled:opacity-50"
-            disabled={!canNext}
+            disabled={meta.page >= Math.max(1, Math.ceil((meta.total || 0) / (meta.pageSize || 10)))}
             onClick={() => load(meta.page + 1)}
           >
             ถัดไป
@@ -445,14 +520,19 @@ export default function AdminSiteVisitsPage() {
       >
         <div className="space-y-3">
           <label className="block">
-            <div className="text-sm text-gray-600 mb-1">Request ID</div>
+            <div className="text-sm text-gray-600 mb-1">Request ID หรือเลขอ้างอิง {/* CHANGED: label */}</div>
             <input
               className="border rounded px-3 py-2 w-full"
               value={createRequestId}
               onChange={(e) => setCreateRequestId(e.target.value)}
-              placeholder="เช่น 123"
-              inputMode="numeric"
+              placeholder="เช่น 123 หรือ REQ-202510-00012" // CHANGED:
+              inputMode="text" // CHANGED: เดิม numeric → อนุญาต REQ-*
             />
+            {initialRequestId && (
+              <p className="text-xs text-gray-500 mt-1">
+                * มาจากหน้า RequestDetail: #{initialRequestId}
+              </p>
+            )}
           </label>
 
           <label className="block">
@@ -490,7 +570,7 @@ export default function AdminSiteVisitsPage() {
         <div className="space-y-3">
           <div className="text-sm text-gray-600">คำขอ</div>
           <div className="font-medium">
-            #{selected?.request?.id} — {selected?.request?.title}
+            {(selected?.request?.publicRef || `#${selected?.request?.id ?? "-"}`)} — {selected?.request?.title}
           </div>
 
           <label className="block">

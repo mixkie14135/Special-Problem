@@ -10,6 +10,17 @@ import {
   QUOTE_STATUS,
   renderBadge,
 } from "@/lib/statusLabels";
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+
+/* ===== Google Map ===== */
+const MAP_LIBRARIES = ["places"];
+
+/* ===== Helpers ===== */
+async function loadJson(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error("load error " + path);
+  return res.json();
+}
 
 export default function RequestDetail({
   requestId,
@@ -21,59 +32,137 @@ export default function RequestDetail({
   const [latestQuote, setLatestQuote] = useState(null);
   const [upcomingVisits, setUpcomingVisits] = useState([]);
 
-  // ===== แนวทาง A =====
-  const canCreateQuote = useMemo(() => {
-    return reqData?.status === "SURVEY_DONE" && !latestQuote;
-  }, [reqData, latestQuote]);
+  // Map loader
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+    libraries: MAP_LIBRARIES,
+  });
 
-  const canEditQuote = useMemo(() => {
-    return !!latestQuote && latestQuote.status === "PENDING";
-  }, [latestQuote]);
+  // Datasets for converting codes → Thai names
+  const [provinces, setProvinces] = useState([]);
+  const [districts, setDistricts] = useState([]);
+  const [subdistricts, setSubdistricts] = useState([]);
 
+  // ==== Load datasets (one-time) ====
+  useEffect(() => {
+    (async () => {
+      try {
+        console.log("[FE] loading TH datasets (provinces/districts/subdistricts) …");
+        const [p, d, s] = await Promise.all([
+          loadJson("/data/provinces.json"),
+          loadJson("/data/districts.json"),
+          loadJson("/data/subdistricts.json"),
+        ]);
+        setProvinces(p);
+        setDistricts(d);
+        setSubdistricts(s);
+        console.log(
+          "[FE] datasets loaded:",
+          { provinces: p.length, districts: d.length, subdistricts: s.length }
+        );
+      } catch (e) {
+        console.error("[FE] datasets load failed:", e?.message || e);
+        setProvinces([]);
+        setDistricts([]);
+        setSubdistricts([]);
+      }
+    })();
+  }, []);
+
+  // ==== Permission to quote ====
+  const canCreateQuote = useMemo(
+    () => reqData?.status === "SURVEY_DONE" && !latestQuote,
+    [reqData, latestQuote]
+  );
+  const canEditQuote = useMemo(
+    () => !!latestQuote && latestQuote.status === "PENDING",
+    [latestQuote]
+  );
   const quoteButtonEnabled = canCreateQuote || canEditQuote;
   const quoteButtonLabel = canEditQuote ? "แก้ไขใบเสนอราคา" : "ส่งใบเสนอราคา";
   const quoteButtonTitle = quoteButtonEnabled
-    ? (canEditQuote ? "อัปโหลดไฟล์ใหม่เพื่อทับของเดิม" : "อัปโหลดใบเสนอราคา (ครั้งแรก)")
-    : (!latestQuote
-        ? "ต้องสถานะ 'ดูหน้างานเสร็จ' ก่อน"
-        : "ไม่สามารถแก้ไขได้ (ลูกค้าตอบแล้ว)");
+    ? canEditQuote
+      ? "อัปโหลดไฟล์ใหม่เพื่อทับของเดิม"
+      : "อัปโหลดใบเสนอราคา (ครั้งแรก)"
+    : !latestQuote
+    ? "ต้องสถานะ 'ดูหน้างานเสร็จ' ก่อน"
+    : "ไม่สามารถแก้ไขได้ (ลูกค้าตอบแล้ว)";
 
+  // ==== Load main data ====
   useEffect(() => {
     if (!requestId) return;
-
     (async () => {
       setLoading(true);
+      console.log("========== [FE] Admin RequestDetail load start ==========");
+      console.log("[FE] requestId =", requestId);
 
-      // 1) รายละเอียดคำขอ
+      // 1) Request detail
       try {
+        console.log("[FE] GET /requests/%s", requestId);
         const { data: r1 } = await apiGet(`/requests/${requestId}`);
+        console.log("[FE] /requests response:", r1?.status, r1?.data);
         setReqData(r1?.data || null);
-      } catch {
+      } catch (e) {
+        console.error(
+          "[FE] /requests/:id failed",
+          e?.response?.status,
+          e?.response?.data || e?.message
+        );
         setReqData(null);
       }
 
-      // 2) ใบเสนอราคาล่าสุด (404 = ยังไม่มี)
+      // 2) Latest quotation (404 is normal if not exists)
       try {
-        const { data: r2 } = await apiGet(`/quotations/${requestId}`, { latest: true });
+        console.log("[FE] GET /quotations/%s?latest=true", requestId);
+        const { data: r2 } = await apiGet(`/quotations/${requestId}`, {
+          latest: true,
+        });
+        console.log("[FE] /quotations latest response:", r2?.status, r2?.data);
         setLatestQuote(r2?.data || null);
       } catch (e) {
+        if (e?.response?.status === 404) {
+          console.log("[FE] no latest quotation (expected 404)");
+        } else {
+          console.error(
+            "[FE] /quotations latest failed",
+            e?.response?.status,
+            e?.response?.data || e?.message
+          );
+        }
         setLatestQuote(null);
       }
 
-      // 3) นัดหมายที่จะถึง
+      // 3) Upcoming site-visits
       try {
+        console.log("[FE] GET /admin/site-visits/upcoming", {
+          requestId,
+          days: 365,
+          page: 1,
+          pageSize: 50,
+        });
         const { data: r3 } = await apiGet(`/admin/site-visits/upcoming`, {
           requestId,
           days: 365,
           page: 1,
           pageSize: 50,
         });
+        console.log(
+          "[FE] /admin/site-visits/upcoming response:",
+          r3?.status,
+          Array.isArray(r3?.data) ? `items=${r3.data.length}` : r3?.data
+        );
         setUpcomingVisits(r3?.data || []);
-      } catch {
+      } catch (e) {
+        console.error(
+          "[FE] /admin/site-visits/upcoming failed",
+          e?.response?.status,
+          e?.response?.data || e?.message
+        );
         setUpcomingVisits([]);
-      } finally {
-        setLoading(false);
       }
+
+      console.log("========== [FE] Admin RequestDetail load end ==========");
+      setLoading(false);
     })();
   }, [requestId]);
 
@@ -81,6 +170,7 @@ export default function RequestDetail({
   if (!reqData) return <div className="text-red-600">ไม่พบคำขอ #{requestId}</div>;
 
   const {
+    publicRef,
     title,
     description,
     status,
@@ -91,28 +181,56 @@ export default function RequestDetail({
     contactPhone,
     formattedAddress,
     placeName,
+    addressLine,
     district,
     province,
+    subdistrict,
     postalCode,
+    latitude,
+    longitude,
     images = [],
     customer,
     createdAt,
   } = reqData;
 
-  const contactName = [contactFirstName, contactLastName].filter(Boolean).join(" ").trim();
+  const contactName = [contactFirstName, contactLastName].filter(Boolean).join(" ");
+
+  // Convert codes → Thai names for display
+  const provinceName =
+    provinces.find((x) => x.provinceCode == province)?.provinceNameTh || province;
+  const districtName =
+    districts.find((x) => x.districtCode == district)?.districtNameTh || district;
+  const subdistrictName =
+    subdistricts.find((x) => x.subdistrictCode == subdistrict)?.subdistrictNameTh ||
+    subdistrict;
+
+  const fullAddress = [
+    placeName,
+    addressLine,
+    subdistrictName && "ต." + subdistrictName,
+    districtName && "อ." + districtName,
+    provinceName && "จ." + provinceName,
+    postalCode,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm text-gray-600">คำขอ #{requestId}</div>
+          <div className="text-sm text-gray-600">
+            เลขอ้างอิง: <span className="font-mono">{publicRef || `#${requestId}`}</span>
+          </div>
           <h2 className="text-xl font-semibold">{title}</h2>
           <div className="mt-1">{renderBadge(REQUEST_STATUS, status)}</div>
+          <div className="text-xs text-gray-500 mt-1">
+            สร้างเมื่อ {createdAt ? new Date(createdAt).toLocaleString("th-TH") : "-"}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {/* ปุ่มนัดดูหน้างาน: ถ้ายังไม่มีนัด ให้เปิดสร้างอัตโนมัติ (autoNew=1) */}
           <a
             className="px-3 py-2 rounded border hover:bg-gray-50"
             href={
@@ -124,7 +242,6 @@ export default function RequestDetail({
             นัดดูหน้างาน
           </a>
 
-          {/* แนวทาง A: ส่งครั้งแรกเฉพาะ SURVEY_DONE, แก้ไขได้เฉพาะใบ PENDING */}
           <button
             className="px-3 py-2 rounded border hover:bg-gray-50 disabled:opacity-50"
             disabled={!quoteButtonEnabled}
@@ -141,7 +258,7 @@ export default function RequestDetail({
         </div>
       </div>
 
-      {/* Customer & Contact */}
+      {/* Contact / Request info */}
       <div className="grid md:grid-cols-2 gap-4">
         <div className="rounded-lg border p-3">
           <div className="font-medium mb-2">ผู้ติดต่อ</div>
@@ -156,7 +273,6 @@ export default function RequestDetail({
           <div className="font-medium mb-2">ข้อมูลคำขอ</div>
           <div className="text-sm">
             <div>หมวดบริการ: {category?.name || "-"}</div>
-            <div>สร้างเมื่อ: {createdAt ? new Date(createdAt).toLocaleString("th-TH") : "-"}</div>
             {customer?.email && (
               <div>
                 ลูกค้า: {customer.firstName} {customer.lastName} ({customer.email})
@@ -166,14 +282,40 @@ export default function RequestDetail({
         </div>
       </div>
 
+      {/* Map */}
+      {isLoaded && latitude && longitude ? (
+        <div className="rounded-lg border p-3">
+          <div className="font-medium mb-2">ตำแหน่งที่ลูกค้าปักหมุด</div>
+          <div className="h-72 border rounded">
+            <GoogleMap
+              center={{ lat: Number(latitude), lng: Number(longitude) }}
+              zoom={15}
+              mapContainerStyle={{ width: "100%", height: "100%" }}
+              onLoad={() => console.log("[FE] GoogleMap loaded")}
+            >
+              <Marker position={{ lat: Number(latitude), lng: Number(longitude) }} />
+            </GoogleMap>
+          </div>
+          <div className="text-sm text-gray-600 mt-2">
+            พิกัด: {latitude}, {longitude}
+          </div>
+        </div>
+      ) : null}
+
       {/* Address */}
       <div className="rounded-lg border p-3">
         <div className="font-medium mb-2">ที่อยู่/สถานที่</div>
-        <div className="text-sm space-y-1">
-          <div>{formattedAddress || placeName || "-"}</div>
-          <div className="text-gray-600">
-            {[district, province, postalCode].filter(Boolean).join(" ")}
-          </div>
+        <div className="text-sm">
+          {formattedAddress ? (
+            <>
+              <div>{formattedAddress}</div>
+              {fullAddress && fullAddress !== formattedAddress ? (
+                <div className="text-gray-600 mt-1">{fullAddress}</div>
+              ) : null}
+            </>
+          ) : (
+            <div>{fullAddress || "-"}</div>
+          )}
         </div>
       </div>
 
@@ -197,7 +339,11 @@ export default function RequestDetail({
                 className="block rounded overflow-hidden border"
                 title="เปิดภาพเต็ม"
               >
-                <img src={fileUrl(im.imageUrl)} alt="" className="w-full h-40 object-cover" />
+                <img
+                  src={fileUrl(im.imageUrl)}
+                  alt=""
+                  className="w-full h-40 object-cover"
+                />
               </a>
             ))}
           </div>
@@ -214,7 +360,10 @@ export default function RequestDetail({
         ) : (
           <div className="space-y-2">
             {upcomingVisits.map((v) => (
-              <div key={v.id} className="rounded border p-2 flex items-center justify-between">
+              <div
+                key={v.id}
+                className="rounded border p-2 flex items-center justify-between"
+              >
                 <div className="text-sm">
                   <div className="font-medium">
                     {new Date(v.scheduledAt).toLocaleString("th-TH", {
@@ -234,9 +383,6 @@ export default function RequestDetail({
             ))}
           </div>
         )}
-        <div className="mt-2 text-xs text-gray-500">
-          * แสดงเฉพาะนัด “ที่จะถึง” (อิง <code>/admin/site-visits/upcoming</code>)
-        </div>
       </div>
 
       {/* Latest Quotation */}
@@ -252,7 +398,8 @@ export default function RequestDetail({
               <div>
                 ยอดรวม:{" "}
                 {latestQuote.totalPrice != null
-                  ? new Intl.NumberFormat("th-TH").format(latestQuote.totalPrice) + " บาท"
+                  ? new Intl.NumberFormat("th-TH").format(latestQuote.totalPrice) +
+                    " บาท"
                   : "-"}
               </div>
               <div>
@@ -261,32 +408,19 @@ export default function RequestDetail({
                   ? new Date(latestQuote.validUntil).toLocaleDateString("th-TH")
                   : "-"}
               </div>
-
-              {latestQuote.status === "PENDING" ? (
-                <div className="text-xs text-amber-700 mt-1">
-                  * ยังแก้ไขไฟล์ใบเสนอราคาได้จนกว่าลูกค้าจะตอบรับ/ปฏิเสธ
-                </div>
-              ) : (
-                <div className="text-xs text-gray-500 mt-1">
-                  * ใบเสนอราคาอยู่ในสถานะ{" "}
-                  {latestQuote.status === "APPROVED" ? "ลูกค้าตกลง" : "ปฏิเสธ"} — ไม่สามารถแก้ไขได้
-                </div>
-              )}
             </div>
-            <div>
-              {latestQuote.fileUrl ? (
-                <a
-                  href={fileUrl(latestQuote.fileUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-2 rounded border hover:bg-gray-50"
-                >
-                  เปิดไฟล์
-                </a>
-              ) : (
-                <span className="text-xs text-gray-500">ไม่มีไฟล์แนบ</span>
-              )}
-            </div>
+            {latestQuote.fileUrl ? (
+              <a
+                href={fileUrl(latestQuote.fileUrl)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-2 rounded border hover:bg-gray-50"
+              >
+                เปิดไฟล์
+              </a>
+            ) : (
+              <span className="text-xs text-gray-500">ไม่มีไฟล์แนบ</span>
+            )}
           </div>
         )}
       </div>
