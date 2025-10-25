@@ -1,46 +1,30 @@
-// src/app/estimate/page.js
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadCatalog, calcConcrete, calcTiling, fmtTHB } from "@/lib/estimate";
-
-const TabBtn = ({ active, onClick, children }) => (
-  <button
-    className={`px-3 py-1.5 rounded border text-sm ${active ? "bg-gray-900 text-white" : "hover:bg-gray-50"}`}
-    onClick={onClick}
-    type="button"
-  >
-    {children}
-  </button>
-);
+import { Toaster, toast } from "sonner";
+import {
+  calcSimpleEstimate,
+  loadSimpleCatalog,
+  moneyTHB,
+} from "@/lib/estimate";
+import Link from "next/link";
 
 export default function EstimatePage() {
   const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("concrete"); // concrete | tile
   const [err, setErr] = useState("");
 
-  // แบบฟอร์ม: คอนกรีต
-  const [areaC, setAreaC] = useState("");
-  const [thicknessC, setThicknessC] = useState("10"); // cm
-  const [grade, setGrade] = useState("g240");
+  // ฟอร์ม
+  const [type, setType] = useState("house"); // house | factory
+  const [area, setArea] = useState("");
 
-  // แบบฟอร์ม: กระเบื้อง
-  const [areaT, setAreaT] = useState("");
-  const [tileKey, setTileKey] = useState("");
-
-  // ผลลัพธ์
   const [result, setResult] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const data = await loadCatalog();
+        const data = await loadSimpleCatalog();
         setCatalog(data);
-        // default tileKey อันแรก
-        const firstTileKey = Object.keys(data.tile || {})[0] || "";
-        setTileKey(firstTileKey);
       } catch (e) {
         setErr(e?.message || "โหลดข้อมูลไม่สำเร็จ");
       } finally {
@@ -49,182 +33,266 @@ export default function EstimatePage() {
     })();
   }, []);
 
-  const monthLabel = useMemo(() => {
-    if (!catalog) return "";
-    const { source, month } = catalog.meta || {};
-    return [source, month].filter(Boolean).join(" • ");
+  const typeOptions = useMemo(() => {
+    if (!catalog?.types) return [];
+    return Object.entries(catalog.types).map(([key, v]) => ({
+      value: key,
+      label: v.label,
+    }));
   }, [catalog]);
 
-  const onCalcConcrete = () => {
-    try {
-      const r = calcConcrete(
-        { areaSqm: areaC, thicknessCm: thicknessC, grade },
-        catalog
-      );
-      setResult({
-        type: "concrete",
-        breakdown: [
-          ["ปริมาตร", `${r.volume_m3} ลบ.ม.`],
-          ["ค่าวัสดุ", fmtTHB(r.material)],
-          ["เศษ/สูญเสีย", fmtTHB(r.loss)],
-          ["ค่าแรง", fmtTHB(r.labor)],
-          ["รวมประมาณการ", fmtTHB(r.total)],
-        ],
-        total: r.total,
-      });
-    } catch (e) {
-      setResult(null);
-      alert(e.message);
-    }
-  };
+  function onCalc(e) {
+    e.preventDefault();
+    const A = Number(area);
+    if (!type) return toast.error("กรุณาเลือกประเภทงาน");
+    if (!A || A <= 0)
+      return toast.error("กรุณากรอกพื้นที่ (ตร.ม.) ให้ถูกต้อง (> 0)");
 
-  const onCalcTile = () => {
     try {
-      const r = calcTiling({ areaSqm: areaT, tileKey }, catalog);
-      setResult({
-        type: "tile",
-        breakdown: [
-          ["กระเบื้อง", fmtTHB(r.tile)],
-          ["กาวซีเมนต์", fmtTHB(r.adhesive)],
-          ["ยาแนว", fmtTHB(r.grout)],
-          ["เศษ/สูญเสีย", fmtTHB(r.loss)],
-          ["ค่าแรง", fmtTHB(r.labor)],
-          ["รวมประมาณการ", fmtTHB(r.total)],
-        ],
-        total: r.total,
-      });
-    } catch (e) {
-      setResult(null);
-      alert(e.message);
+      const r = calcSimpleEstimate({ area: A, type }, catalog);
+      setResult(r);
+    } catch (e2) {
+      toast.error(e2?.message || "คำนวณไม่สำเร็จ");
     }
-  };
+  }
 
-  if (loading) return <div className="max-w-4xl mx-auto px-4 py-8">กำลังโหลดข้อมูล…</div>;
-  if (err) return <div className="max-w-4xl mx-auto px-4 py-8 text-red-600">{err}</div>;
+  if (loading)
+    return <div className="max-w-4xl mx-auto px-4 py-8">กำลังโหลด...</div>;
+  if (err)
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8 text-red-600">{err}</div>
+    );
+  if (!catalog)
+    return <div className="max-w-4xl mx-auto px-4 py-8">ไม่พบข้อมูล</div>;
+
+  const metaNote = catalog?.meta?.note;
+  const srcText = catalog?.meta?.source;
+  const unit = catalog?.meta?.unit || "บาท/ตร.ม.";
+  const currentType = catalog?.types?.[type];
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      <div>
+      <Toaster richColors />
+      <header className="space-y-1">
         <h1 className="text-2xl font-semibold">ประเมินราคาเบื้องต้น</h1>
-        {monthLabel && <p className="text-sm text-gray-600 mt-1">อ้างอิงราคา: {monthLabel}</p>}
-      </div>
+        <p className="text-gray-600">
+          กรอกประเภทงานและขนาดพื้นที่ ระบบจะคำนวณช่วงราคาเบื้องต้นให้
+          (ไม่ผูกพันราคา) — {srcText}
+        </p>
+      </header>
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        <TabBtn active={tab === "concrete"} onClick={() => setTab("concrete")}>เทพื้นคอนกรีต</TabBtn>
-        <TabBtn active={tab === "tile"} onClick={() => setTab("tile")}>ปูกระเบื้อง</TabBtn>
-      </div>
+      {/* อธิบายโมเดลการประเมิน */}
+      <section className="rounded-lg border p-4 space-y-2 bg-gray-50">
+        <h2 className="font-medium">
+          โมเดลการประเมินราคาเบื้องต้น (Cover-All per sq.m.)
+        </h2>
+        <p className="text-sm text-gray-700">
+          หน้านี้ใช้เรตราคา <strong>เหมารวมต่อพื้นที่ (บาท/ตร.ม.)</strong>{" "}
+          เพื่อให้ลูกค้าเห็นงบประมาณโดยประมาณ
+          ก่อนเข้าสู่ขั้นตอนสำรวจหน้างาน/ออกแบบ/ขอใบเสนอราคาจริง
+          เรตราคานี้สามารถใช้เป็นแนวทางได้ทั้ง
+          <strong> งานก่อสร้างใหม่</strong> และ{" "}
+          <strong>งานรีโนเวท/ต่อเติมทั่วไป</strong>
+        </p>
 
-      {/* Forms */}
-      {tab === "concrete" && (
-        <section className="rounded-lg border p-4 space-y-4">
-          <div className="grid md:grid-cols-3 gap-3">
-            <label className="block">
-              <div className="text-xs text-gray-600 mb-1">พื้นที่ (ตร.ม.)</div>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                value={areaC}
-                onChange={(e) => setAreaC(e.target.value)}
-                inputMode="decimal"
-                placeholder="เช่น 50"
-              />
-            </label>
-            <label className="block">
-              <div className="text-xs text-gray-600 mb-1">ความหนา (ซม.)</div>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                value={thicknessC}
-                onChange={(e) => setThicknessC(e.target.value)}
-                inputMode="decimal"
-                placeholder="เช่น 10"
-              />
-            </label>
-            <label className="block">
-              <div className="text-xs text-gray-600 mb-1">เกรดคอนกรีต</div>
-              <select
-                className="border rounded px-3 py-2 w-full"
-                value={grade}
-                onChange={(e) => setGrade(e.target.value)}
-              >
-                {Object.entries(catalog.concrete.grades).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {k.toUpperCase()} — {fmtTHB(v)}/ลบ.ม.
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div className="grid md:grid-cols-2 gap-3 text-sm">
+          <div className="rounded border bg-white p-3">
+            <div className="font-medium mb-1">รวมโดยทั่วไป</div>
+            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+              <li>
+                งานโครงสร้าง/สถาปัตย์พื้นฐาน (ฐานราก, คาน, เสา, พื้น, หลังคา,
+                ผนัง, ฉาบ, ทาสี)
+              </li>
+              <li>วัสดุมาตรฐานตามเกรดทั่วไป</li>
+              <li>งานระบบพื้นฐานในปริมาณทั่วไป (ไฟฟ้า/ประปาภายในพื้นที่งาน)</li>
+              <li>ค่าแรงช่างและค่าควบคุมงานตามมาตรฐาน</li>
+            </ul>
           </div>
+          <div className="rounded border bg-white p-3">
+            <div className="font-medium mb-1">ยังไม่รวมโดยปกติ</div>
+            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+              <li>
+                งานระบบเฉพาะ: ไฟฟ้าแรงสูง, ปรับอากาศ, ดับเพลิง,
+                สุขาภิบาลอุตสาหกรรม
+              </li>
+              <li>
+                วัสดุ/งานพิเศษ: Built-in, กระจกพิเศษ, พื้น PU/อีพ็อกซี, Food
+                Grade, Hygiene
+              </li>
+              <li>งานรื้อถอนซับซ้อน/แก้โครงสร้างเดิม (ต้องสำรวจหน้างานจริง)</li>
+              <li>
+                เงื่อนไขพิเศษ: ทำงานกลางคืน, เข้าพื้นที่ยาก, เครื่องจักรยก/เครน,
+                เดินทางไกล
+              </li>
+            </ul>
+          </div>
+        </div>
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800"
-              onClick={onCalcConcrete}
+        <p className="text-xs text-gray-500">
+          *หมายเหตุ:* รายการ “รวม/ไม่รวม”
+          ข้างต้นเป็นเกณฑ์มาตรฐานสำหรับการสื่อสารเบื้องต้นเท่านั้น
+          ราคาจริงจะยืนยันหลังจากมีแบบ/สCOPEชัดเจนหรือสำรวจหน้างาน
+        </p>
+      </section>
+
+      {/* Form */}
+      <form onSubmit={onCalc} className="rounded-lg border p-4 space-y-4">
+        <div className="grid md:grid-cols-3 gap-3">
+          <label className="block">
+            <div className="text-xs text-gray-600 mb-1">ประเภทงาน</div>
+            <select
+              className="border rounded px-3 py-2 w-full"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
             >
-              คำนวณ
-            </button>
-          </div>
-        </section>
-      )}
+              {typeOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {currentType && (
+              <div className="text-xs text-gray-500 mt-1">
+                เรตราคา: {moneyTHB(currentType.min)} –{" "}
+                {moneyTHB(currentType.max)} ต่อ {unit}
+              </div>
+            )}
+          </label>
 
-      {tab === "tile" && (
-        <section className="rounded-lg border p-4 space-y-4">
-          <div className="grid md:grid-cols-3 gap-3">
-            <label className="block md:col-span-1">
-              <div className="text-xs text-gray-600 mb-1">พื้นที่ (ตร.ม.)</div>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                value={areaT}
-                onChange={(e) => setAreaT(e.target.value)}
-                inputMode="decimal"
-                placeholder="เช่น 40"
-              />
-            </label>
-            <label className="block md:col-span-2">
-              <div className="text-xs text-gray-600 mb-1">ชนิดกระเบื้อง</div>
-              <select
-                className="border rounded px-3 py-2 w-full"
-                value={tileKey}
-                onChange={(e) => setTileKey(e.target.value)}
-              >
-                {Object.entries(catalog.tile).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {k.replaceAll("_", " ")} — {fmtTHB(v)}/ตร.ม.
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="block md:col-span-2">
+            <div className="text-xs text-gray-600 mb-1">พื้นที่ (ตร.ม.)</div>
+            <input
+              className="border rounded px-3 py-2 w-full"
+              placeholder="เช่น 120"
+              inputMode="decimal"
+              value={area}
+              onChange={(e) => setArea(e.target.value)}
+            />
+          </label>
+        </div>
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800"
-              onClick={onCalcTile}
-            >
-              คำนวณ
-            </button>
-          </div>
-        </section>
-      )}
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            className="px-5 py-2 rounded bg-black text-white hover:bg-gray-800"
+          >
+            คำนวณราคา
+          </button>
+        </div>
+      </form>
 
       {/* Result */}
       {result && (
-        <section className="rounded-lg border p-4">
-          <div className="font-medium mb-2">สรุปประมาณการ</div>
-          <div className="divide-y">
-            {result.breakdown.map(([label, val]) => (
-              <div key={label} className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-700">{label}</span>
-                <span className="font-medium">{val}</span>
+        <section className="rounded-lg border p-4 space-y-4">
+          <h2 className="font-medium">สรุปประมาณการ</h2>
+
+          <div className="grid md:grid-cols-3 gap-3">
+            <div className="rounded border p-3">
+              <div className="text-xs text-gray-600">ราคาต่ำสุด (Min)</div>
+              <div className="text-xl font-semibold">
+                {moneyTHB(result.min)}
               </div>
-            ))}
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-xs text-gray-600">ราคาสูงสุด (Max)</div>
+              <div className="text-xl font-semibold">
+                {moneyTHB(result.max)}
+              </div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-xs text-gray-600">ราคาเฉลี่ย (Avg)</div>
+              <div className="text-xl font-semibold">
+                {moneyTHB(result.avg)}
+              </div>
+            </div>
           </div>
-          <div className="mt-3 text-xs text-gray-500">
-            * เป็นราคาโดยประมาณจากข้อมูล {monthLabel} (รวมค่าแรงและเผื่อสูญเสีย {catalog.meta.wastage_pct}%)
+
+          <div className="rounded-lg bg-gray-50 border p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-600">รวมโดยประมาณ</div>
+              <div className="text-2xl font-bold">{moneyTHB(result.total)}</div>
+            </div>
+            <Link
+              href="/request-quote"
+              className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800"
+            >
+              ขอใบเสนอราคาจริง
+            </Link>
           </div>
+
+          {/* หมายเหตุการประเมิน */}
+          <section className="rounded-lg border p-4 bg-white">
+            <h3 className="font-medium mb-2">หมายเหตุการประเมิน</h3>
+            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+              <li>
+                เป็นการประเมินราคาเบื้องต้นแบบเหมารวมต่อ ตร.ม.
+                เพื่อช่วยวางงบประมาณคร่าว ๆ ของลูกค้า
+              </li>
+              <li>
+                ใช้เป็นแนวทางได้ทั้งงานก่อสร้างใหม่และงานรีโนเวท/ต่อเติมทั่วไป
+              </li>
+              <li>
+                รวมค่าแรงและวัสดุพื้นฐานตามมาตรฐานทั่วไป{" "}
+                <span className="text-gray-500">
+                  (ดู “รวมโดยทั่วไป” ด้านบน)
+                </span>
+              </li>
+              <li>
+                ยังไม่รวมงานระบบ/วัสดุ/เงื่อนไขพิเศษ
+                และอาจปรับตามแบบและสภาพหน้างานจริง
+              </li>
+              <li>
+                ตัวเลขที่แสดงเป็นช่วงราคา (Min–Max/Avg)
+                เพื่อสะท้อนความไม่แน่นอนก่อนเห็นหน้างาน
+              </li>
+            </ul>
+            <p className="text-xs text-gray-500 mt-2">
+              หากต้องการใบเสนอราคาจริง
+              โปรดนัดหมายสำรวจหน้างานหรือส่งแบบ/สCOPEงานเพื่อประเมินอย่างละเอียด
+            </p>
+          </section>
         </section>
       )}
+
+      {/* ข้อควรรู้ก่อนขอใบเสนอราคา */}
+      <section className="rounded-lg border p-4 space-y-3 bg-gray-50">
+        <h2 className="font-medium">ข้อควรรู้ก่อนขอใบเสนอราคา</h2>
+
+        <details className="rounded border bg-white p-3">
+          <summary className="font-medium cursor-pointer">
+            เรต 9,000–20,000 บาท/ตร.ม. สำหรับ “บ้าน” ครอบคลุมอะไร
+          </summary>
+          <div className="mt-2 text-sm text-gray-700">
+            รวมค่าแรงและวัสดุพื้นฐานของงานโครงสร้าง–สถาปัตย์ทั่วไป (ฐานราก
+            โครงสร้าง หลังคา ผนัง พื้น ฝ้า ทาสี) และระบบพื้นฐานในปริมาณทั่วไป{" "}
+            <strong>ยังไม่รวม</strong>{" "}
+            งานระบบเฉพาะ/วัสดุพิเศษ/รื้อถอนซับซ้อน/เงื่อนไขพิเศษ
+            ช่วงราคาไว้เพื่อเผื่อความต่างของสภาพหน้างานและสเปกที่ยังไม่ล็อก
+          </div>
+        </details>
+
+        <details className="rounded border bg-white p-3">
+          <summary className="font-medium cursor-pointer">
+            ใช้กับงานรีโนเวท/ต่อเติมได้หรือไม่
+          </summary>
+          <div className="mt-2 text-sm text-gray-700">
+            ใช้เป็นแนวทางเบื้องต้นได้ แต่อาจต้องสำรวจหน้างานเพื่อยืนยันสCOPE
+            (มีรื้อถอน/แก้โครงสร้างเดิมหรือไม่)
+            แล้วจึงออกใบเสนอราคาจริงให้ตรงกับงาน
+          </div>
+        </details>
+
+        <details className="rounded border bg-white p-3">
+          <summary className="font-medium cursor-pointer">
+            แตกต่างจากใบเสนอราคาจริงอย่างไร
+          </summary>
+          <div className="mt-2 text-sm text-gray-700">
+            หน้านี้เป็น <strong>ประเมินเบื้องต้น</strong>{" "}
+            ต่อพื้นที่เพื่อเห็นงบคร่าว ๆ ส่วนใบเสนอราคาจริงอิงแบบ รายการสเปก
+            สภาพหน้างาน และเงื่อนไขการทำงาน จึงอาจต่างจากตัวเลขเบื้องต้นได้
+          </div>
+        </details>
+      </section>
     </div>
   );
 }
