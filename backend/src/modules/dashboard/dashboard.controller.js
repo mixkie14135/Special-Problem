@@ -12,11 +12,12 @@ exports.overview = async (req, res) => {
     const { from, to } = req.query || {};
     const whereRange = {};
     if (from || to) {
-      whereRange.createdAt = {};
-      if (from) whereRange.createdAt.gte = new Date(from);
-      if (to) whereRange.createdAt.lte = new Date(to);
+      const gte = from ? new Date(from) : undefined;
+      const lte = to   ? new Date(to)   : undefined;
+      if (gte || lte) whereRange.createdAt = { ...(gte && { gte }), ...(lte && { lte }) };
     }
 
+    // totals + breakdown
     const total = await prisma.serviceRequest.count({ where: whereRange });
     const byStatus = await prisma.serviceRequest.groupBy({
       by: ['status'],
@@ -24,31 +25,41 @@ exports.overview = async (req, res) => {
       where: whereRange
     });
 
+    // === KPIs จาก ServiceRequest.status (เสี่ยงต่ำ ไม่กระทบหน้าอื่น) ===
+    const QUOTE_STATES_ALL = ['QUOTED','APPROVED','REJECTED'];
+
     const [
-      pendingSurvey,
-      surveyDone,
-      quoted,
+      quoted_pending,         // รอลูกค้าตัดสินใจ
       approved,
-      rejected
+      rejected,
+      quoted_all
     ] = await Promise.all([
-      prisma.serviceRequest.count({ where: { ...whereRange, status: 'SURVEY' } }),
-      prisma.serviceRequest.count({ where: { ...whereRange, status: 'SURVEY_DONE' } }),
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'QUOTED' } }),
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'APPROVED' } }),
       prisma.serviceRequest.count({ where: { ...whereRange, status: 'REJECTED' } }),
+      prisma.serviceRequest.count({ where: { ...whereRange, status: { in: QUOTE_STATES_ALL } } }),
     ]);
 
-    const conversion = quoted ? Math.round((approved / quoted) * 100) : null;
+    const conversion   = quoted_all > 0 ? Math.round((approved / quoted_all) * 100) : 0;
+    const decisionRate = quoted_all > 0 ? Math.round(((approved + rejected) / quoted_all) * 100) : 0;
 
     return res.json({
       status: 'ok',
       data: {
         totals: { requests: total },
         breakdown: byStatus.map(s => ({ status: s.status, count: s._count.status })),
-        kpis: { pendingSurvey, surveyDone, quoted, approved, rejected, conversion }
+        kpis: {
+          quoted_all,        // ← FE ใช้การ์ด "ใบเสนอราคาทั้งหมด"
+          quoted_pending,    // ← FE ใช้การ์ด "รอลูกค้าตัดสินใจ"
+          approved,
+          rejected,
+          conversion,        // Approved / All Quotes
+          decisionRate,      // (Approved + Rejected) / All Quotes
+        }
       }
     });
   } catch (err) {
+    if (DEV) console.error('overview error >>>', err);
     return res.status(500).json({ status: 'error', message: 'Server error' });
   }
 };

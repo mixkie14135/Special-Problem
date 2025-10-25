@@ -8,6 +8,7 @@ import {
   REQUEST_STATUS,
   VISIT_STATUS,
   QUOTE_STATUS,
+  VISIT_RESPONSE,     // ✅ เพิ่ม
   renderBadge,
 } from "@/lib/statusLabels";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
@@ -378,7 +379,12 @@ export default function RequestDetail({
                       : "-"}
                   </div>
                 </div>
-                <div className="flex gap-2">{renderBadge(VISIT_STATUS, v.status)}</div>
+
+                {/* ✅ แสดงแบดจ์สถานะนัด + การตอบลูกค้า */}
+                <div className="flex items-center gap-2">
+                  {renderBadge(VISIT_STATUS, v.status)}
+                  {renderBadge(VISIT_RESPONSE, v.customerResponse || "PENDING")}
+                </div>
               </div>
             ))}
           </div>
@@ -427,3 +433,4 @@ export default function RequestDetail({
     </div>
   );
 }
+

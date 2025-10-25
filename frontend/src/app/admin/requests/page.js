@@ -1,4 +1,3 @@
-// frontend/src/app/admin/requests/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,6 +11,7 @@ import RequestDetail from "@/components/admin/RequestDetail";
 import { toast, Toaster } from "sonner";
 import { REQUEST_STATUS, renderBadge } from "@/lib/statusLabels";
 import { Clipboard } from "lucide-react";
+import { confirm } from "@/lib/dialogs"; // ✅ SweetAlert helper
 
 export default function AdminRequestsPage() {
   const router = useRouter();
@@ -83,7 +83,7 @@ export default function AdminRequestsPage() {
       const req = data?.data;
       if (!req) return { ok: false, reason: "ไม่พบคำขอ" };
 
-      // หา visit ล่าสุด (ตาม controller รายละเอียดส่งเรียงเวลาอยู่แล้ว แต่กันพลาด)
+      // หา visit ล่าสุด
       const visits = Array.isArray(req.siteVisits) ? req.siteVisits : [];
       if (!visits.length) {
         return { ok: false, reason: "ยังไม่มีนัดหมายดูหน้างาน" };
@@ -128,6 +128,19 @@ export default function AdminRequestsPage() {
   async function submitUpload() {
     if (!targetReq) return;
     if (!file) return toast.error("กรุณาเลือกไฟล์ PDF ใบเสนอราคา");
+
+    // ✅ SweetAlert: ยืนยันก่อนส่งไฟล์จริง
+    const { isConfirmed } = await confirm({
+      title: modalMode === "edit" ? "อัปเดตใบเสนอราคา?" : "ส่งใบเสนอราคา?",
+      text:
+        modalMode === "edit"
+          ? "ระบบจะอัปเดตไฟล์/ข้อมูลใบเสนอราคาล่าสุดของคำขอนี้"
+          : "ระบบจะส่งไฟล์ใบเสนอราคาให้ลูกค้า",
+      confirmButtonText: modalMode === "edit" ? "อัปเดต" : "ส่ง",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+
     setUploading(true);
     try {
       const fd = new FormData();

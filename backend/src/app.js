@@ -83,6 +83,8 @@ app.use('/api', require('./modules/site-visits/siteVisit.routes'));
 app.use('/api', require('./modules/quotations/quotation.routes'));
 app.use('/api', require('./modules/dashboard/dashboard.routes'));
 
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 /** --------- Multer error handler --------- */
 app.use((err, req, res, next) => {
   if (err && err.name === 'MulterError') {

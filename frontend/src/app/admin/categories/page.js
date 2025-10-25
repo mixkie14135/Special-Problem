@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { api, toPublicUrl } from "@/lib/api";
 import { toast, Toaster } from "sonner";
 import Modal from "@/components/admin/Modal";
+import { confirm } from "@/lib/dialogs";
+import "sweetalert2/dist/sweetalert2.min.css";
 
 export default function AdminCategoriesPage() {
   const [items, setItems] = useState([]);
@@ -125,7 +127,13 @@ export default function AdminCategoriesPage() {
   }
 
   async function onDelete(id) {
-    if (!confirm("ลบหมวดหมู่นี้?")) return;
+    const { isConfirmed } = await confirm({
+      title: "ลบหมวดหมู่?",
+      text: "คุณแน่ใจหรือไม่ที่จะลบหมวดหมู่นี้",
+      confirmButtonText: "ลบ",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
     try {
       await api.delete(`/categories/${id}`);
       toast.success("ลบแล้ว");
@@ -210,10 +218,7 @@ export default function AdminCategoriesPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td
-                  colSpan={5}
-                  className="px-4 py-6 text-center text-gray-500"
-                >
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
                   กำลังโหลด...
                 </td>
               </tr>
@@ -254,10 +259,7 @@ export default function AdminCategoriesPage() {
               ))
             ) : (
               <tr>
-                <td
-                  colSpan={5}
-                  className="px-4 py-6 text-center text-gray-500"
-                >
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
                   ยังไม่มีหมวดหมู่
                 </td>
               </tr>

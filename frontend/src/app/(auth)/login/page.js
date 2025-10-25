@@ -90,9 +90,9 @@ export default function LoginPage() {
               {errors.password && <p className="text-xs text-red-600 mt-1">{errors.password.message}</p>}
             </div>
 
-            <div className="flex items-center justify-between text-sm">
+            {/* <div className="flex items-center justify-between text-sm">
               <Link href="/forgot-password" className="text-gray-700 hover:underline">ลืมรหัสผ่าน?</Link>
-            </div>
+            </div> */}
 
             <button
               className="w-full bg-black text-white px-4 py-2 rounded disabled:opacity-70"

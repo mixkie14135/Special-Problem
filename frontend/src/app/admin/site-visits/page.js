@@ -11,6 +11,8 @@ import { toast, Toaster } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import { VISIT_STATUS, VISIT_RESPONSE, renderBadge } from "@/lib/statusLabels";
 import { Clipboard } from "lucide-react";
+import { confirm } from "@/lib/dialogs"; // ✅ เพิ่ม SweetAlert helper
+import "sweetalert2/dist/sweetalert2.min.css"; // ✅ เพิ่ม CSS ของ SweetAlert
 
 function toLocalDatetimeValue(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -19,15 +21,15 @@ function toLocalDatetimeValue(d = new Date()) {
   )}:${pad(d.getMinutes())}`;
 }
 
-// --- helper: แปลง input “Request ID หรือ PublicRef” เป็นเลข id (ถ้าแปลงได้) --- // CHANGED:
-function coerceRequestId(v) { // CHANGED:
-  if (!v) return ""; // CHANGED:
-  const s = String(v).trim(); // CHANGED:
-  if (/^\d+$/.test(s)) return String(Number(s)); // normalize leading zero // CHANGED:
-  // publicRef format: REQ-YYYYMM-00001 → id = 1 (เลขท้าย 5 หลัก) // CHANGED:
-  const m = /^REQ-\d{6}-(\d{5})$/i.exec(s); // CHANGED:
-  if (m) return String(Number(m[1])); // CHANGED:
-  return ""; // ไม่รู้จักรูปแบบ → ไม่ส่ง requestId ไป backend // CHANGED:
+// --- helper: แปลง input “Request ID หรือ PublicRef” เป็นเลข id (ถ้าแปลงได้) ---
+function coerceRequestId(v) {
+  if (!v) return "";
+  const s = String(v).trim();
+  if (/^\d+$/.test(s)) return String(Number(s)); // normalize leading zero
+  // publicRef format: REQ-YYYYMM-00001 → id = 1 (เลขท้าย 5 หลัก)
+  const m = /^REQ-\d{6}-(\d{5})$/i.exec(s);
+  if (m) return String(Number(m[1]));
+  return ""; // ไม่รู้จักรูปแบบ → ไม่ส่ง requestId ไป backend
 }
 
 export default function AdminSiteVisitsPage() {
@@ -97,29 +99,29 @@ export default function AdminSiteVisitsPage() {
     }));
   }, []);
 
-  // โหลดข้อมูล (รวม logic แยกแยะ q เป็น text หรือ publicRef/ID) // CHANGED:
-  const load = useCallback( // CHANGED:
-    async (page = 1) => { // CHANGED:
+  // โหลดข้อมูล (รวม logic แยกแยะ q เป็น text หรือ publicRef/ID)
+  const load = useCallback(
+    async (page = 1) => {
       setLoading(true);
       try {
         const p = { page, pageSize: 10 };
         if (status) p.status = status;
 
         // ใช้ช่องเดียว: ถ้า q เป็น ID/REF → ส่งเป็น requestId, ถ้าเป็นข้อความ → ส่ง q
-        const kw = q.trim();                 // CHANGED:
-        if (kw) {                            // CHANGED:
-          if (/^REQ-\d{6}-\d{5}$/i.test(kw)) {               // CHANGED:
-            p.requestId = String(Number(kw.slice(-5)));       // CHANGED:
-          } else if (/^\d+$/.test(kw)) {                      // CHANGED:
-            p.requestId = String(Number(kw));                 // CHANGED:
-          } else {                                            // CHANGED:
-            p.q = kw;                                         // CHANGED:
-          }                                                   // CHANGED:
-        }                                                      // CHANGED:
+        const kw = q.trim();
+        if (kw) {
+          if (/^REQ-\d{6}-\d{5}$/i.test(kw)) {
+            p.requestId = String(Number(kw.slice(-5)));
+          } else if (/^\d+$/.test(kw)) {
+            p.requestId = String(Number(kw));
+          } else {
+            p.q = kw;
+          }
+        }
 
         // รองรับ requestId จาก query string (เช่นมาจากหน้า RequestDetail)
-        const ridFromParam = coerceRequestId(requestId); // CHANGED:
-        if (ridFromParam && !p.requestId) p.requestId = ridFromParam; // CHANGED:
+        const ridFromParam = coerceRequestId(requestId);
+        if (ridFromParam && !p.requestId) p.requestId = ridFromParam;
 
         if (useCustomRange) {
           if (dateFrom) p.dateFrom = dateFrom;
@@ -136,10 +138,10 @@ export default function AdminSiteVisitsPage() {
         setMeta(data?.meta || { page, pageSize: 10, total: 0 });
 
         // กรณีมากับ requestId & autoNew=1 แล้ว “ยังไม่มีนัด” → เปิดสร้างอัตโนมัติ
-        if (page === 1 && autoNew && (p.requestId || ridFromParam) && rows.length === 0) { // CHANGED:
-          const ridToUse = p.requestId || ridFromParam; // CHANGED:
+        if (page === 1 && autoNew && (p.requestId || ridFromParam) && rows.length === 0) {
+          const ridToUse = p.requestId || ridFromParam;
           console.log("[FE] autoNew=1 → open create modal (no visits yet)");
-          setCreateRequestId(ridToUse); // เก็บเป็นเลข id ที่ normalize แล้ว // CHANGED:
+          setCreateRequestId(ridToUse); // เก็บเป็นเลข id ที่ normalize แล้ว
           setCreateWhen(toLocalDatetimeValue(new Date(Date.now() + 24 * 3600 * 1000))); // +1 วัน
           setOpenCreate(true);
         }
@@ -153,8 +155,8 @@ export default function AdminSiteVisitsPage() {
     },
     [
       status,
-      q,                // CHANGED:
-      requestId,        // CHANGED:
+      q,
+      requestId,
       useCustomRange,
       dateFrom,
       dateTo,
@@ -293,6 +295,16 @@ export default function AdminSiteVisitsPage() {
 
   const onSave = async () => {
     if (!selected) return;
+
+    // ✅ SweetAlert: ยืนยันก่อนบันทึกการแก้ไข
+    const { isConfirmed } = await confirm({
+      title: "บันทึกการแก้นัดหมาย?",
+      text: "ยืนยันการอัปเดตวัน–เวลาหรือสถานะของนัดนี้",
+      confirmButtonText: "บันทึก",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+
     setSaving(true);
     try {
       const payload = {};
@@ -312,16 +324,25 @@ export default function AdminSiteVisitsPage() {
   };
 
   const onCreate = async () => {
+    // ✅ SweetAlert: ยืนยันก่อนสร้างนัดใหม่
+    const { isConfirmed } = await confirm({
+      title: "สร้างนัดหมายใหม่?",
+      text: "คุณแน่ใจหรือไม่ที่จะสร้างนัดหมายใหม่นี้",
+      confirmButtonText: "สร้างนัด",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+
     setCreating(true);
     try {
-      const rid = coerceRequestId(createRequestId); // CHANGED:
+      const rid = coerceRequestId(createRequestId);
       if (!rid) {
-        toast.error("กรุณาระบุ Request ID (เลข) หรือเลขอ้างอิงรูปแบบ REQ-YYYYMM-00001"); // CHANGED:
+        toast.error("กรุณาระบุ Request ID (เลข) หรือเลขอ้างอิงรูปแบบ REQ-YYYYMM-00001");
         setCreating(false);
         return;
       }
       const payload = {
-        requestId: Number(rid), // CHANGED:
+        requestId: Number(rid),
         scheduledAt: new Date(createWhen).toISOString(),
       };
       console.log("[FE] POST /admin/site-visits payload=", payload);
@@ -417,10 +438,10 @@ export default function AdminSiteVisitsPage() {
               )}
             </div>
 
-            {/* ค้นหา (ช่องเดียว ครอบคลุม ID/เลขอ้างอิง/ข้อความ) */} {/* CHANGED: */}
-            <label className="block md:col-span-3"> {/* CHANGED: */}
+            {/* ค้นหา (ช่องเดียว ครอบคลุม ID/เลขอ้างอิง/ข้อความ) */}
+            <label className="block md:col-span-3">
               <div className="text-xs text-gray-600 mb-1">
-                ค้นหา (หัวข้อคำขอ/ชื่อลูกค้า/เลขอ้างอิง/Request ID) {/* CHANGED: */}
+                ค้นหา (หัวข้อคำขอ/ชื่อลูกค้า/เลขอ้างอิง/Request ID)
               </div>
               <input
                 className="border rounded px-3 py-2 w-full"
@@ -443,7 +464,7 @@ export default function AdminSiteVisitsPage() {
                 setUseCustomRange(false);
                 setDateFrom("");
                 setDateTo("");
-                setQ("");                            // CHANGED:
+                setQ("");
                 setRequestId(initialRequestId || "");
               }}
               title="ล้างตัวกรองทั้งหมด"
@@ -520,13 +541,13 @@ export default function AdminSiteVisitsPage() {
       >
         <div className="space-y-3">
           <label className="block">
-            <div className="text-sm text-gray-600 mb-1">Request ID หรือเลขอ้างอิง {/* CHANGED: label */}</div>
+            <div className="text-sm text-gray-600 mb-1">Request ID หรือเลขอ้างอิง</div>
             <input
               className="border rounded px-3 py-2 w-full"
               value={createRequestId}
               onChange={(e) => setCreateRequestId(e.target.value)}
-              placeholder="เช่น 123 หรือ REQ-202510-00012" // CHANGED:
-              inputMode="text" // CHANGED: เดิม numeric → อนุญาต REQ-*
+              placeholder="เช่น 123 หรือ REQ-202510-00012"
+              inputMode="text"
             />
             {initialRequestId && (
               <p className="text-xs text-gray-500 mt-1">

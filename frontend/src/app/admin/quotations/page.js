@@ -1,4 +1,3 @@
-// frontend/src/app/admin/quotations/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11,6 +10,7 @@ import RequestDetail from "@/components/admin/RequestDetail";
 import { Toaster, toast } from "sonner";
 import { fileUrl } from "@/lib/urls";
 import { QUOTE_STATUS, renderBadge } from "@/lib/statusLabels";
+import { confirm } from "@/lib/dialogs"; // ✅ SweetAlert helper
 
 function toISODate(d) {
   if (!d) return "";
@@ -148,6 +148,17 @@ export default function AdminQuotationsPage() {
       toast.error("กรุณาเลือกไฟล์ใบเสนอราคา (PDF)");
       return;
     }
+
+    // ✅ SweetAlert ยืนยันก่อนทำจริง
+    const { isConfirmed } = await confirm({
+      title: canCreate ? "ส่งใบเสนอราคา?" : "อัปเดตใบเสนอราคา?",
+      text: canCreate
+        ? "ระบบจะส่งไฟล์ใบเสนอราคาใหม่ให้ลูกค้า"
+        : "ระบบจะอัปเดตไฟล์/ข้อมูลของใบเสนอราคาล่าสุด",
+      confirmButtonText: canCreate ? "ส่งใบเสนอราคา" : "อัปเดต",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
 
     setSaving(true);
     try {
@@ -318,9 +329,7 @@ export default function AdminQuotationsPage() {
                   </label>
 
                   <label className="block">
-                    <div className="text-sm text-gray-600 mb-1">
-                      ยอดรวม (บาท)
-                    </div>
+                    <div className="text-sm text-gray-600 mb-1">ยอดรวม (บาท)</div>
                     <input
                       className="border rounded px-3 py-2 w-full"
                       value={uplPrice}
@@ -451,7 +460,9 @@ export default function AdminQuotationsPage() {
           const daysLeft = Math.ceil((d - now) / 86400000);
           const dateText = d.toLocaleDateString("th-TH");
           if (d < now)
-            return <span className="text-red-600">{dateText} • หมดอายุแล้ว</span>;
+            return (
+              <span className="text-red-600">{dateText} • หมดอายุแล้ว</span>
+            );
           if (daysLeft <= 7)
             return (
               <span className="text-amber-700">
@@ -538,7 +549,10 @@ export default function AdminQuotationsPage() {
           <div className="rounded-lg border p-6 text-center text-gray-500">
             ไม่พบข้อมูลที่ตรงเงื่อนไข
             <div className="mt-2">
-              <button className="px-3 py-2 rounded border" onClick={onClearFilters}>
+              <button
+                className="px-3 py-2 rounded border"
+                onClick={onClearFilters}
+              >
                 ล้างตัวกรอง
               </button>
             </div>

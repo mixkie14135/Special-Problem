@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
+import { fileUrl } from "@/lib/urls"; // ✅ เพิ่ม
 
 export default function MyQuotationsPage() {
   const [items, setItems] = useState(null);
@@ -30,7 +31,7 @@ export default function MyQuotationsPage() {
         <div className="rounded border p-4 text-gray-600">ยังไม่มีใบเสนอราคา</div>
       ) : (
         <div className="grid gap-3">
-          {items.map(q => (
+          {items.map((q) => (
             <div key={q.id} className="rounded border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -47,7 +48,12 @@ export default function MyQuotationsPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   {q.fileUrl && (
-                    <a href={q.fileUrl} target="_blank" className="px-3 py-1.5 rounded border hover:bg-gray-50">
+                    <a
+                      href={fileUrl(q.fileUrl) /* ✅ ใช้ตัวช่วยแปลง URL ให้ถูกโดเมน */}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded border hover:bg-gray-50"
+                    >
                       ดาวน์โหลด PDF
                     </a>
                   )}

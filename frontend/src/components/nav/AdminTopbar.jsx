@@ -1,9 +1,12 @@
+// src/components/nav/AdminTopbar.jsx
 "use client";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { clearSession } from "@/lib/auth";
+import { confirm } from "@/lib/dialogs";
+import "sweetalert2/dist/sweetalert2.min.css";
 
 function UserIcon({ className = "w-5 h-5" }) {
   return (
@@ -43,31 +46,32 @@ export default function AdminTopbar() {
     };
   }, [open]);
 
-  const logout = () => {
+  const hardLogout = () => {
     clearSession();
     setOpen(false);
     router.replace("/login");
     router.refresh();
   };
 
+  const onClickLogout = async () => {
+    const { isConfirmed } = await confirm({
+      title: "ออกจากระบบ?",
+      text: "คุณต้องการออกจากระบบตอนนี้หรือไม่",
+      confirmButtonText: "ออกจากระบบ",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+    hardLogout();
+  };
+
   return (
-    // CHANGED: ความสูง/แพดดิ้ง/เงา/z-index เหมือน PublicNavbar
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur shadow-sm">
-      {/* CHANGED: h-[72px] px-4 md:px-10 xl:px-[190px] */}
       <div className="h-[72px] flex items-center justify-between px-4 md:px-10 xl:px-[190px]">
-        {/* CHANGED: จัด layout โลโก้ให้เหมือน PublicNavbar (gap-3, ขนาด 150x48, priority) */}
         <Link href="/admin" className="flex items-center gap-3" aria-label="ไปหน้าแดชบอร์ดแอดมิน">
-          <Image
-            src="/logo_brand.svg"
-            alt="Bon Plus Thai"
-            width={150}
-            height={48}
-            priority
-          />
+          <Image src="/logo_brand.svg" alt="Bon Plus Thai" width={150} height={48} priority />
         </Link>
 
         <div className="flex items-center gap-2">
-
           <div className="relative">
             <button
               ref={btnRef}
@@ -126,7 +130,7 @@ export default function AdminTopbar() {
                 </div>
 
                 <div className="h-px bg-gray-100" />
-                <button onClick={logout} className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50" role="menuitem">
+                <button onClick={onClickLogout} className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50" role="menuitem">
                   ออกจากระบบ
                 </button>
               </div>

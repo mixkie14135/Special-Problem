@@ -1,3 +1,4 @@
+// หน้า หลักของเว็บไซต์ (Landing Page)
 import Link from "next/link";
 
 export default function HomePage() {
@@ -22,10 +23,10 @@ export default function HomePage() {
               พร้อมส่งมอบงานที่คุ้มค่า ครอบคลุมงานบ้านจนถึงงานโครงการขนาดใหญ่
             </p>
             <div className="mt-6 flex gap-3">
-              <Link href="/request-quote" className="px-4 py-2 rounded bg-black text-white hover:bg-gray-900">
+              <Link href="/request-quote" className="px-4 py-2 rounded-full bg-black text-white hover:bg-gray-900">
                 ขอใบเสนอราคา
               </Link>
-              <Link href="/estimate" className="px-4 py-2 rounded border hover:bg-gray-50">
+              <Link href="/estimate" className="px-4 py-2 rounded-full bg-[#E2AC24] text-white hover:bg-[#c89a1f]">
                 ประเมินราคาเบื้องต้น
               </Link>
             </div>
@@ -57,7 +58,7 @@ export default function HomePage() {
               <li>✅ งานตรงเวลา มาตรฐานคุณภาพ</li>
               <li>✅ บริการครบวงจร ตั้งแต่งานโครงสร้างถึงงานดีไซน์</li>
             </ul>
-            <Link href="/services" className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded border hover:bg-gray-50">
+            <Link href="/services" className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded border bg-black text-white hover:bg-gray-900">
               บริการของเรา <span aria-hidden>↗</span>
             </Link>
           </div>

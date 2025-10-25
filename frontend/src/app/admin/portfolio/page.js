@@ -1,9 +1,10 @@
-// src/app/admin/portfolio/page.js
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { fileUrl } from "@/lib/urls";
+import { confirm } from "@/lib/dialogs"; // ✅ เพิ่ม
+import "sweetalert2/dist/sweetalert2.min.css"; // ✅ เพิ่ม
 
 export default function AdminPortfolioPage() {
   const [categories, setCategories] = useState([]);
@@ -43,10 +44,20 @@ export default function AdminPortfolioPage() {
       toast.error("กรอกชื่อผลงานและเลือกรูป");
       return;
     }
+
+    // ✅ SweetAlert ยืนยันก่อนอัปโหลด
+    const { isConfirmed } = await confirm({
+      title: "อัปโหลดผลงานใหม่?",
+      text: "คุณต้องการเพิ่มผลงานนี้เข้าสู่ระบบหรือไม่",
+      confirmButtonText: "อัปโหลด",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("image", image); // backend: uploadPortfolio.single('image')
+      fd.append("image", image);
       fd.append("title", title.trim());
       if (desc.trim()) fd.append("description", desc.trim());
       if (categoryId) fd.append("categoryId", String(categoryId));
@@ -56,12 +67,10 @@ export default function AdminPortfolioPage() {
       });
 
       toast.success("อัปโหลดผลงานแล้ว");
-      // reset form
       setImage(null);
       setTitle("");
       setDesc("");
       setCategoryId("");
-      // reload list
       loadAll();
     } catch (e) {
       toast.error(e?.response?.data?.message || "อัปโหลดไม่สำเร็จ");
@@ -71,7 +80,15 @@ export default function AdminPortfolioPage() {
   }
 
   async function onDelete(id) {
-    if (!confirm("ลบผลงานนี้?")) return;
+    // ✅ SweetAlert แทน confirm เดิม
+    const { isConfirmed } = await confirm({
+      title: "ลบผลงานนี้?",
+      text: "คุณต้องการลบผลงานนี้ออกจากระบบหรือไม่",
+      confirmButtonText: "ลบ",
+      cancelButtonText: "ยกเลิก",
+    });
+    if (!isConfirmed) return;
+
     try {
       await api.delete(`/portfolio/${id}`);
       toast.success("ลบแล้ว");
@@ -148,7 +165,6 @@ export default function AdminPortfolioPage() {
           </button>
         </div>
 
-        {/* Preview */}
         <div className="rounded-lg border p-4 flex items-center justify-center min-h-48">
           {image ? (
             <img
@@ -184,8 +200,6 @@ export default function AdminPortfolioPage() {
                 </div>
                 <div className="p-3 space-y-1">
                   <div className="font-medium">{it.title}</div>
-                  {/* หมายเหตุ: portfolio.list ฝั่ง backend ตอนนี้ไม่ได้ include category
-                      ถ้าอยากโชว์ ให้ปรับ controller ให้ include หรือ map ฝั่ง FE เอง */}
                   {it.category?.name && (
                     <div className="text-xs text-gray-600">{it.category.name}</div>
                   )}
